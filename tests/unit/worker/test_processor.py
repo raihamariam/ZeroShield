@@ -1,0 +1,235 @@
+import json
+from pathlib import Path
+
+from zeroshield.models import ApprovalStatus
+from zeroshield.policies import ExecutionContext
+from zeroshield.services.job_store import JobStatus, JobStore
+from zeroshield.worker.processor import process_run_job
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+EXPERIMENTS_DIR = REPO_ROOT / "experiments"
+VPN_EXPERIMENT_PATH = EXPERIMENTS_DIR / "ZC-VPN-EXP-001.json"
+TELECOM_EXPERIMENT_PATH = EXPERIMENTS_DIR / "ZC-TELECOM-EXP-001.json"
+
+
+def test_process_run_job_vpn_end_to_end(tmp_path: Path) -> None:
+    """Integration-level: real orchestration/runner/strategies, no mocking."""
+    job_store = JobStore(tmp_path / "jobs")
+    results_root = tmp_path / "results"
+
+    process_run_job(
+        "JOB-vpn",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=results_root,
+        job_store=job_store,
+    )
+
+    record = job_store.load("JOB-vpn")
+    assert record is not None
+    assert record.status == JobStatus.COMPLETED
+    assert record.result is not None
+    assert record.result.total_cases == 22
+    assert record.result.mitigation_block_rate == 1.0
+    assert record.error is None
+    assert (results_root / "ZC-VPN-EXP-001" / "comparison.json").is_file()
+
+
+def test_process_run_job_telecom_end_to_end(tmp_path: Path) -> None:
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-telecom",
+        "ZC-TELECOM-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+    record = job_store.load("JOB-telecom")
+    assert record is not None
+    assert record.status == JobStatus.COMPLETED
+    assert record.result is not None
+    assert record.result.total_cases == 25
+
+
+def test_process_run_job_denied_by_safety_policy(tmp_path: Path) -> None:
+    """Draft VPN experiment under the strict experiment_run context must be denied."""
+    job_store = JobStore(tmp_path / "jobs")
+    results_root = tmp_path / "results"
+
+    process_run_job(
+        "JOB-denied",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.EXPERIMENT_RUN,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=results_root,
+        job_store=job_store,
+    )
+
+    record = job_store.load("JOB-denied")
+    assert record is not None
+    assert record.status == JobStatus.DENIED
+    assert record.result is None
+    assert record.error is not None
+    assert "SAFE-004" in record.error
+    # strongest proof: no evidence was ever written, the runner never executed a case
+    assert not results_root.exists()
+
+
+def test_process_run_job_unsafe_configured_experiment_is_denied(tmp_path: Path) -> None:
+    data = json.loads(VPN_EXPERIMENT_PATH.read_text(encoding="utf-8"))
+    data["weaponised_payloads"] = True
+    data["approval_status"] = ApprovalStatus.APPROVED.value
+    experiments_dir = tmp_path / "unsafe_experiments"
+    experiments_dir.mkdir()
+    (experiments_dir / "unsafe.json").write_text(json.dumps(data), encoding="utf-8")
+
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-unsafe",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.EXPERIMENT_RUN,
+        experiments_dir=experiments_dir,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    record = job_store.load("JOB-unsafe")
+    assert record is not None
+    assert record.status == JobStatus.DENIED
+    assert record.error is not None
+    assert "SAFE-003" in record.error
+
+
+def test_process_run_job_experiment_not_found_marks_failed(tmp_path: Path) -> None:
+    job_store = JobStore(tmp_path / "jobs")
+    empty_dir = tmp_path / "no_experiments_here"
+    empty_dir.mkdir()
+
+    process_run_job(
+        "JOB-missing",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=empty_dir,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    record = job_store.load("JOB-missing")
+    assert record is not None
+    assert record.status == JobStatus.FAILED
+    assert record.error is not None
+    assert "could not be found" in record.error
+
+
+def test_process_run_job_unknown_strategy_marks_failed_without_leaking_detail(
+    tmp_path: Path,
+) -> None:
+    data = json.loads(VPN_EXPERIMENT_PATH.read_text(encoding="utf-8"))
+    data["baseline_strategy"] = "totally_unknown_strategy"
+    experiments_dir = tmp_path / "bad_experiments"
+    experiments_dir.mkdir()
+    (experiments_dir / "bad.json").write_text(json.dumps(data), encoding="utf-8")
+
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-bad-strategy",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=experiments_dir,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    record = job_store.load("JOB-bad-strategy")
+    assert record is not None
+    assert record.status == JobStatus.FAILED
+    assert record.error is not None
+    assert "totally_unknown_strategy" not in record.error
+
+
+def test_process_run_job_missing_dataset_marks_failed_without_leaking_server_path(
+    tmp_path: Path,
+) -> None:
+    data = json.loads(VPN_EXPERIMENT_PATH.read_text(encoding="utf-8"))
+    data["dataset_path"] = "test_data/vpn/does_not_exist.json"
+    experiments_dir = tmp_path / "bad_experiments"
+    experiments_dir.mkdir()
+    (experiments_dir / "bad.json").write_text(json.dumps(data), encoding="utf-8")
+
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-bad-dataset",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=experiments_dir,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    record = job_store.load("JOB-bad-dataset")
+    assert record is not None
+    assert record.status == JobStatus.FAILED
+    assert record.error is not None
+    assert str(Path.cwd()) not in record.error
+
+
+def test_process_run_job_unexpected_error_marks_failed_generically(tmp_path: Path) -> None:
+    """A dataset/experiment domain mismatch raises a plain ValueError deep inside
+    ExperimentRunner.run() - not PolicyRefusalError or ExperimentServiceError - exercising
+    the generic catch-all. The real exception must still never reach the job record."""
+    data = json.loads(VPN_EXPERIMENT_PATH.read_text(encoding="utf-8"))
+    data["dataset_path"] = "test_data/telecom/telecom_sip_session_setup_dataset.json"
+    experiments_dir = tmp_path / "mismatched_experiments"
+    experiments_dir.mkdir()
+    (experiments_dir / "mismatched.json").write_text(json.dumps(data), encoding="utf-8")
+
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-mismatch",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=experiments_dir,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    record = job_store.load("JOB-mismatch")
+    assert record is not None
+    assert record.status == JobStatus.FAILED
+    assert record.error == "an internal error occurred"
+
+
+def test_process_run_job_preserves_submitted_at_from_existing_record(tmp_path: Path) -> None:
+    """Simulates the API having already written a QUEUED record before the worker picks it up."""
+    from datetime import UTC, datetime
+
+    from zeroshield.services.job_store import JobRecord
+
+    job_store = JobStore(tmp_path / "jobs")
+    original_submitted_at = datetime(2020, 1, 1, tzinfo=UTC)
+    job_store.save(
+        JobRecord(
+            job_id="JOB-preexisting",
+            experiment_id="ZC-VPN-EXP-001",
+            execution_context=ExecutionContext.LOCAL_UNIT_TEST,
+            status=JobStatus.QUEUED,
+            submitted_at=original_submitted_at,
+            updated_at=original_submitted_at,
+        )
+    )
+
+    process_run_job(
+        "JOB-preexisting",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    record = job_store.load("JOB-preexisting")
+    assert record is not None
+    assert record.submitted_at == original_submitted_at
+    assert record.updated_at > original_submitted_at

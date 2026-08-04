@@ -1,30 +1,39 @@
-"""Experiment listing, detail, validation, and execution routes.
+"""Experiment listing, detail, validation, and (asynchronous) execution routes.
 
 Every handler here is a thin wrapper: it loads the already-validated
 ExperimentDefinition via the get_experiment dependency and delegates all
-safety/execution work to zeroshield.services.experiment_service. Denials
-(PolicyRefusalError) and unrunnable-experiment errors (ExperimentServiceError)
-are handled centrally in zeroshield.api.errors and are never caught here.
+safety/execution work to zeroshield.services.experiment_service - except
+/runs, which only queues a job. SafetyPolicy is evaluated solely by the
+RabbitMQ worker (zeroshield.worker.processor) when that job actually runs,
+never here.
 """
 
+import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from zeroshield.api.dependencies import get_experiment, get_experiments_dir, get_results_root
+from zeroshield.api.dependencies import (
+    get_experiment,
+    get_experiments_dir,
+    get_job_store,
+    get_publisher,
+)
 from zeroshield.api.schemas import (
     CVESummary,
     ExecutionContextRequest,
     ExperimentDetailResponse,
     ExperimentListResponse,
     ExperimentSummary,
-    KeyMetrics,
-    RunResponse,
+    JobSubmittedResponse,
     ValidationResponse,
 )
 from zeroshield.models import ExperimentDefinition
 from zeroshield.services import experiment_service
+from zeroshield.services.job_store import JobRecord, JobStatus, JobStore, RunJobMessage
 
 router = APIRouter(tags=["experiments"])
 
@@ -111,35 +120,39 @@ def validate_experiment(
 
 @router.post(
     "/experiments/{experiment_id}/runs",
-    response_model=RunResponse,
-    summary="Run an experiment",
-    description="Executes baseline and mitigation synchronously via the existing orchestration "
-    "layer and persists evidence. Denied by SafetyPolicy -> 403. Unrunnable (missing dataset, "
-    "unknown strategy) -> 422.",
+    response_model=JobSubmittedResponse,
+    status_code=202,
+    summary="Submit an experiment run (asynchronous)",
+    description="Queues baseline+mitigation execution on RabbitMQ and returns immediately with "
+    "a job_id. Poll GET /jobs/{job_id} for status and, once completed, the result. SafetyPolicy "
+    "is evaluated by the worker when the job actually runs - it is never evaluated or bypassed "
+    "here, so a 202 response is not itself proof the run was, or will be, allowed.",
 )
-def run_experiment(
+def submit_run(
     experiment: Annotated[ExperimentDefinition, Depends(get_experiment)],
-    results_root: Annotated[Path, Depends(get_results_root)],
     request: ExecutionContextRequest,
-) -> RunResponse:
-    summary = experiment_service.run_experiment(
-        experiment, execution_context=request.execution_context, results_root=results_root
+    job_store: Annotated[JobStore, Depends(get_job_store)],
+    publish: Annotated[Callable[[RunJobMessage], None], Depends(get_publisher)],
+) -> JobSubmittedResponse:
+    job_id = f"JOB-{uuid.uuid4().hex}"
+    now = datetime.now(UTC)
+    job_store.save(
+        JobRecord(
+            job_id=job_id,
+            experiment_id=experiment.experiment_id,
+            execution_context=request.execution_context,
+            status=JobStatus.QUEUED,
+            submitted_at=now,
+            updated_at=now,
+        )
     )
-    baseline_metrics = summary.comparison_report.baseline_metrics
-    mitigation_metrics = summary.comparison_report.mitigation_metrics
-    return RunResponse(
-        experiment_id=experiment.experiment_id,
-        baseline_run_id=summary.comparison_report.baseline_run_id,
-        mitigation_run_id=summary.comparison_report.mitigation_run_id,
-        status="completed",
-        safety_passed=True,
-        total_cases=summary.comparison_report.total_cases,
-        key_metrics=KeyMetrics(
-            baseline_block_rate=baseline_metrics.block_rate,
-            mitigation_block_rate=mitigation_metrics.block_rate,
-            baseline_valid_acceptance_rate=baseline_metrics.valid_acceptance_rate,
-            mitigation_valid_acceptance_rate=mitigation_metrics.valid_acceptance_rate,
-            block_rate_improvement=summary.comparison_report.block_rate_improvement,
-        ),
-        evidence_location=str(summary.results_dir),
+    publish(
+        RunJobMessage(
+            job_id=job_id,
+            experiment_id=experiment.experiment_id,
+            execution_context=request.execution_context,
+        )
+    )
+    return JobSubmittedResponse(
+        job_id=job_id, experiment_id=experiment.experiment_id, status=JobStatus.QUEUED.value
     )

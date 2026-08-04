@@ -7,7 +7,7 @@ internal Python objects" requirement. Fields are plain str/float/bool - no
 core business logic is implemented in this module.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from zeroshield.policies import ExecutionContext
 
@@ -54,6 +54,8 @@ class ExperimentDetailResponse(BaseModel):
 
 
 class ExecutionContextRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     execution_context: ExecutionContext = Field(
         description=(
             "Safety-policy execution context. 'experiment_run' is the strict, real-world "
@@ -72,23 +74,31 @@ class ValidationResponse(BaseModel):
     overall_valid: bool
 
 
-class KeyMetrics(BaseModel):
-    baseline_block_rate: float
-    mitigation_block_rate: float
-    baseline_valid_acceptance_rate: float
-    mitigation_valid_acceptance_rate: float
-    block_rate_improvement: float
-
-
-class RunResponse(BaseModel):
+class JobSubmittedResponse(BaseModel):
+    job_id: str
     experiment_id: str
+    status: str
+
+
+class JobResultSummary(BaseModel):
     baseline_run_id: str
     mitigation_run_id: str
-    status: str
-    safety_passed: bool
     total_cases: int
-    key_metrics: KeyMetrics
+    baseline_block_rate: float
+    mitigation_block_rate: float
+    block_rate_improvement: float
     evidence_location: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    experiment_id: str
+    execution_context: str
+    status: str
+    submitted_at: str
+    updated_at: str
+    result: JobResultSummary | None = None
+    error: str | None = None
 
 
 class MetricsSummary(BaseModel):

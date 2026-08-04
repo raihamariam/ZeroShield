@@ -2,7 +2,7 @@
 
 A Sandbox-Based Validation Framework for Zero-Click Vulnerability Mitigations — a defensive R&D prototype that converts selected VPN and Telecommunications zero-click CVE research into safe, reproducible, synthetic mitigation-validation experiments.
 
-Status: **Milestones 1–20 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a synchronous FastAPI REST interface, and a Docker image/Compose setup for the API and dashboard. RabbitMQ, MinIO, Prometheus, and Grafana have not been started.
+Status: **Milestones 1–21 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, and asynchronous experiment execution via RabbitMQ and a worker process. MinIO, Prometheus, and Grafana have not been started.
 
 Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
 
@@ -68,7 +68,27 @@ cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
 .\.venv\Scripts\python.exe -m pip install -e ".[api,dev]"
 ```
 
-### 3. Start the API
+### 3. Start RabbitMQ and the worker (required for runs to actually complete)
+
+As of Milestone 21, submitting a run no longer executes it directly — the API queues it on RabbitMQ and a separate **worker** process picks it up. Without a running broker and worker, a submitted run will just sit as `queued` forever. The simplest way to get RabbitMQ running is via Docker, even if you're running the API itself natively:
+
+```powershell
+docker compose up -d rabbitmq
+```
+
+Then, in a second PowerShell window, start the worker:
+
+```powershell
+cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
+.\.venv\Scripts\python.exe -m pip install -e ".[queue,dev]"
+.\.venv\Scripts\python.exe -m zeroshield.worker
+```
+
+Leave this window open too — the worker keeps running and processing jobs as long as this command is running.
+
+### 4. Start the API
+
+In a third PowerShell window:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn zeroshield.api.app:app --reload
@@ -76,7 +96,7 @@ cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
 
 Leave this window open — the API keeps running as long as this command is running.
 
-### 4. Open Swagger (the interactive API test page)
+### 5. Open Swagger (the interactive API test page)
 
 In your browser, go to:
 
@@ -86,11 +106,11 @@ http://localhost:8000/docs
 
 This page lists every endpoint and lets you send real requests by clicking "Try it out" — you never need to write an HTTP request by hand.
 
-### 5. List experiments
+### 6. List experiments
 
 In Swagger, open **GET /experiments** → "Try it out" → "Execute". You'll see `ZC-VPN-EXP-001` and `ZC-TELECOM-EXP-001` (or any other experiment file dropped into the `experiments/` folder — nothing is hard-coded).
 
-### 6. Validate an experiment
+### 7. Validate an experiment
 
 Open **POST /experiments/{experiment_id}/validate** → "Try it out" → set `experiment_id` to `ZC-VPN-EXP-001` → in the request body put:
 
@@ -100,7 +120,7 @@ Open **POST /experiments/{experiment_id}/validate** → "Try it out" → set `ex
 
 → "Execute". You'll see whether ZeroShield's safety policy currently allows it to run, and why if not.
 
-### 7. Run a draft experiment using local_unit_test
+### 8. Run a draft experiment using local_unit_test
 
 Both bundled experiments are still in `draft` review status, so the strict `experiment_run` context will always correctly refuse them (this is the safety gate working as intended, not a bug). To actually execute one for a local demonstration, use **POST /experiments/{experiment_id}/runs** with:
 
@@ -108,22 +128,30 @@ Both bundled experiments are still in `draft` review status, so the strict `expe
 {"execution_context": "local_unit_test"}
 ```
 
-This runs the real baseline and mitigation and writes real evidence to `results/`.
+→ "Execute". This queues the run and returns immediately with a `job_id` and `status: "queued"` — it does not run the experiment itself. The worker (started in step 3) picks the job up, runs it for real, and writes real evidence to `results/`.
 
-### 8. Inspect results/evidence
+Copy the `job_id`, then open **GET /jobs/{job_id}** → paste it in → "Execute". Keep re-running it (a few seconds apart) until `status` becomes `completed` (or `denied`/`failed`, with a reason) — that response also includes the key metrics and where the evidence was written.
+
+### 9. Inspect results/evidence
+
+Once a job has completed:
 
 - **GET /experiments/{experiment_id}/results** — the baseline-vs-mitigation comparison from the most recent run.
 - **GET /experiments/{experiment_id}/evidence** — factual evidence metadata (run IDs, dataset hash, integrity check) for the most recent run.
 
 Both return `404` until an experiment has actually been run at least once.
 
-### 9. Stop the server
+### 10. Stop everything
 
-Go back to the PowerShell window running uvicorn and press `Ctrl+C`.
+Go back to each PowerShell window (uvicorn, the worker) and press `Ctrl+C`, then stop RabbitMQ:
+
+```powershell
+docker compose down
+```
 
 ## Running ZeroShield with Docker
 
-If you have Docker Desktop installed, you can run the API and dashboard without installing Python or any dependencies on your own machine at all.
+If you have Docker Desktop installed, you can run everything — API, dashboard, RabbitMQ, and the worker — without installing Python or any dependencies on your own machine at all. This is the easiest way to get asynchronous runs working, since it starts RabbitMQ and the worker for you automatically.
 
 ### 1. Install Docker Desktop
 
@@ -136,18 +164,19 @@ cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
 docker compose up --build
 ```
 
-The first build downloads and installs everything and can take a few minutes; later runs are much faster.
+The first build downloads and installs everything and can take a few minutes; later runs are much faster. This starts four containers: `rabbitmq`, `api`, `worker`, and `dashboard` — a run submitted through the API here is picked up and executed automatically, with no extra steps.
 
 ### 3. Open the tools
 
 - API Swagger: `http://localhost:8000/docs`
 - Dashboard: `http://localhost:8501`
+- RabbitMQ management UI (optional, for the curious): `http://localhost:15673` (login `guest`/`guest`)
 
 They behave exactly like the non-Docker versions described above — same safety checks, same experiments, same real evidence generation.
 
 ### 4. Where results go
 
-Anything ZeroShield generates while running in Docker (evidence, comparisons, Overleaf exports) is written to the same `results/` and `overleaf_exports/` folders you'd see running it directly — Docker doesn't hide or lose this data, it's shared with your project folder automatically.
+Anything ZeroShield generates while running in Docker (evidence, comparisons, Overleaf exports, job records) is written to the same `results/`, `overleaf_exports/`, and `jobs/` folders you'd see running it directly — Docker doesn't hide or lose this data, it's shared with your project folder automatically.
 
 ### 5. Stop everything
 

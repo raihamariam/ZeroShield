@@ -1,16 +1,40 @@
-# Runs the existing API and dashboard in containers, sharing one built image.
-# results/ and overleaf_exports/ are bind-mounted so evidence generated inside
-# a container is inspectable on the host, exactly like a non-Docker local run.
+# Runs the existing API, dashboard, RabbitMQ, and worker in containers, api/
+# dashboard/worker sharing one built image. results/, overleaf_exports/, and
+# jobs/ are bind-mounted so evidence and job records generated inside a
+# container are inspectable on the host, exactly like a non-Docker local run.
+#
+# RabbitMQ's AMQP port (5672) is intentionally NOT published to the host -
+# only the api/worker containers need it, over the internal compose network
+# (reachable at hostname "rabbitmq"). The management UI is published on an
+# alternate host port (15673) to avoid clashing with any other RabbitMQ
+# instance that might already be using the default 15672 on this machine.
 
 services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    ports:
+      - "15673:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
   api:
     build: .
     image: zeroshield:latest
     ports:
       - "8000:8000"
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     volumes:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports
+      - ./jobs:/app/jobs
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     command: ["python", "-m", "uvicorn", "zeroshield.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
@@ -18,6 +42,19 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  worker:
+    build: .
+    image: zeroshield:latest
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./results:/app/results
+      - ./jobs:/app/jobs
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    command: ["python", "-m", "zeroshield.worker"]
 
   dashboard:
     build: .

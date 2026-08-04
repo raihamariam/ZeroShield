@@ -53,3 +53,17 @@ def discover_experiments(directory: Path) -> ExperimentDiscoveryResult:
             )
 
     return ExperimentDiscoveryResult(experiments=experiments, skipped=skipped)
+
+
+def find_experiment(directory: Path, experiment_id: str) -> ExperimentDefinition | None:
+    """Discover experiments under directory and return the one matching experiment_id.
+
+    Shared by the API's get_experiment dependency and the worker process (which runs in
+    a separate process and cannot share in-memory state), so both look up an experiment
+    the same way. experiment_id is only ever compared for equality against already-
+    validated, discovered IDs - never used to build a filesystem path.
+    """
+    for candidate in discover_experiments(directory).experiments:
+        if candidate.experiment_id == experiment_id:
+            return candidate
+    return None

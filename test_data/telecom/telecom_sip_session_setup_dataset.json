@@ -1,0 +1,886 @@
+{
+  "test_set_id": "telecom-sip-session-setup-v1",
+  "version": "1.0.0",
+  "domain": "TELECOM",
+  "cases": [
+    {
+      "case_id": "TEL-VALID-001",
+      "category": "valid",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic valid session-setup INVITE at INIT state with well-formed headers and SDP",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-VALID-002",
+      "category": "valid",
+      "input_data": {
+        "method": "ACK",
+        "session_state": "RINGING",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 2,
+        "expected_sequence_number": 2,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic valid ACK arriving in RINGING state, a legal state transition",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-VALID-003",
+      "category": "valid",
+      "input_data": {
+        "method": "BYE",
+        "session_state": "ESTABLISHED",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 3,
+        "expected_sequence_number": 3,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic valid BYE arriving in ESTABLISHED state, a legal state transition",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-VALID-004",
+      "category": "valid",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/EVS"
+          ],
+          [
+            "fmtp",
+            "mode-set=0,2,4,7"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic valid session-setup INVITE with an alternative well-formed codec/SDP attribute set",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-BOUNDARY-001",
+      "category": "boundary",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "video-configuration",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic boundary case: video-configuration SDP attribute value exactly at the assumed maximum (256 characters), expected to remain acceptable; abstracted from CVE-2023-26497 (Samsung Exynos baseband video-configuration attribute memory corruption)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-BOUNDARY-002",
+      "category": "boundary",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "video-configuration",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic boundary case: video-configuration SDP attribute value one character over the assumed maximum (257 characters), expected to be rejected; abstracted from CVE-2023-26497",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-BOUNDARY-003",
+      "category": "boundary",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 4096,
+        "actual_body_length": 4096
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic boundary case: declared/actual body length exactly at the assumed maximum (4096 bytes), expected to remain acceptable",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-MISSING-HEADER-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic missing-mandatory-header pattern: Call-ID absent from session-setup message",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-MISSING-HEADER-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic missing-mandatory-header pattern: From absent from session-setup message",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-MISSING-HEADER-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic missing-mandatory-header pattern: To absent from session-setup message",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-OVERSIZED-FIELD-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic oversized SDP attribute value pattern, abstracted from CVE-2023-24033 (Samsung Exynos baseband Shannon SDP 'accept-type' attribute memory corruption during VoLTE/IMS session negotiation)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-OVERSIZED-FIELD-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "fmtp",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic oversized SDP attribute value pattern, abstracted from CVE-2023-26496 (Samsung Exynos baseband Shannon SDP 'fmtp' attribute memory corruption)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-OVERSIZED-FIELD-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "chatroom",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic oversized SDP attribute value pattern, abstracted from CVE-2023-26498 (Samsung Exynos baseband Shannon SDP 'chatroom' attribute memory corruption from an unvalidated property count)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-MALFORMED-LENGTH-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 4096
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic declared-shorter-than-actual body-length mismatch pattern",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-MALFORMED-LENGTH-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 4096,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic declared-longer-than-actual body-length mismatch pattern",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-MALFORMED-LENGTH-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": -1,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic negative/invalid declared-length pattern",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-DUPLICATE-IDENTITY-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "Call-ID",
+            "call-9999"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic duplicate Call-ID header pattern with conflicting session-identity values",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-DUPLICATE-IDENTITY-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "From",
+            "sip:mallory@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic duplicate From header pattern with conflicting originating-identity values",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-DUPLICATE-IDENTITY-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:carol@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic duplicate To header pattern with conflicting destination-identity values",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-INVALID-SEQUENCE-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 0,
+        "expected_sequence_number": 5,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic replayed/stale sequence-number pattern (received sequence lower than expected)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-INVALID-SEQUENCE-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 99,
+        "expected_sequence_number": 5,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic skipped/out-of-order sequence-number pattern (received sequence far ahead of expected)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-INVALID-SEQUENCE-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": -1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic negative/invalid sequence-number pattern",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-INVALID-TRANSITION-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "ACK",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic invalid protocol-state-transition pattern: ACK received before any INVITE established a session (session_state=INIT)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-INVALID-TRANSITION-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "BYE",
+        "session_state": "INIT",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 1,
+        "expected_sequence_number": 1,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic invalid protocol-state-transition pattern: BYE received for a session that was never established (session_state=INIT)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "TEL-INVALID-TRANSITION-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "INVITE",
+        "session_state": "ESTABLISHED",
+        "headers": [
+          [
+            "Call-ID",
+            "call-0001"
+          ],
+          [
+            "From",
+            "sip:alice@ims.example.local"
+          ],
+          [
+            "To",
+            "sip:bob@ims.example.local"
+          ]
+        ],
+        "sequence_number": 4,
+        "expected_sequence_number": 4,
+        "sdp_attributes": [
+          [
+            "accept-type",
+            "audio/AMR"
+          ]
+        ],
+        "declared_body_length": 32,
+        "actual_body_length": 32
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic invalid protocol-state-transition pattern: INVITE received for a session already in ESTABLISHED state",
+      "version": "1.0.0"
+    }
+  ]
+}

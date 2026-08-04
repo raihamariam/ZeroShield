@@ -1,0 +1,83 @@
+{
+  "experiment_id": "ZC-VPN-EXP-001",
+  "title": "Pre-Authentication VPN Gateway Request Validation and Parser Shielding",
+  "domain": "VPN",
+  "description": "Synthetic evaluation of whether a pre-parser validation layer can reject structurally invalid, pre-authentication VPN gateway requests before they reach memory-unsafe parsing or file-path resolution code, modeled on recurring pre-authentication SSL VPN and application-delivery-controller gateway weaknesses (oversized/malformed HTTP fields and unvalidated path traversal) documented across multiple vendors in the VPN/Remote-Access CVE evidence base.",
+  "related_cves": [
+    {
+      "cve_id": "CVE-2024-21762",
+      "domain": "VPN",
+      "cvss_score": 9.8,
+      "cisa_kev": true,
+      "epss_score": 0.8343,
+      "trust_boundary": "Internet to pre-auth SSL VPN service",
+      "root_cause": "memory_safety_failure",
+      "vendor_mitigation": "Upgrade to fixed FortiOS versions per FG-IR-24-015 (7.4.3, 7.2.7, 7.0.14, 6.4.15, 6.2.16+); workaround: disable SSL VPN; after exposure, investigate for compromise and rotate VPN credentials/certificates and review for persistence.",
+      "mitigation_gap": "Patch only / operational recovery unspecified: fixed versions and the disable-SSL-VPN workaround are clear, but the advisory gives limited guidance on post-compromise credential rotation and persistence hunting. Mitigation Gap Level: Moderate.",
+      "source_urls": [
+        "https://www.fortiguard.com/psirt/FG-IR-24-015",
+        "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+        "https://nvd.nist.gov/vuln/detail/CVE-2024-21762"
+      ],
+      "retrieved_date": "2026-07-13"
+    },
+    {
+      "cve_id": "CVE-2023-3519",
+      "domain": "VPN",
+      "cvss_score": 9.8,
+      "cisa_kev": true,
+      "epss_score": 0.9972,
+      "trust_boundary": "Internet to pre-auth VPN/gateway service",
+      "root_cause": "memory_safety_failure",
+      "vendor_mitigation": "Upgrade to fixed NetScaler builds per Citrix CTX561482 (13.1-49.13, 13.0-91.13, and supported 12.1 fixes); requires Gateway/AAA configuration to be vulnerable; after exposure, hunt for webshells, rotate credentials, and rebuild if compromise is confirmed.",
+      "mitigation_gap": "Partial: fixed versions are clear and CISA advisory AA23-201A adds detailed hunting guidance, but the vendor advisory itself is light on mandatory credential rotation/rebuild after confirmed compromise. Mitigation Gap Level: Moderate.",
+      "source_urls": [
+        "https://support.citrix.com/article/CTX561482",
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-201a",
+        "https://nvd.nist.gov/vuln/detail/CVE-2023-3519"
+      ],
+      "retrieved_date": "2026-07-13"
+    },
+    {
+      "cve_id": "CVE-2019-19781",
+      "domain": "VPN",
+      "cvss_score": 9.8,
+      "cisa_kev": true,
+      "epss_score": 0.99999,
+      "trust_boundary": "Internet to pre-auth VPN/ADC gateway",
+      "root_cause": "input_validation_failure",
+      "vendor_mitigation": "Upgrade to fixed builds per Citrix advisory CTX267027; because in-the-wild implants were observed surviving simple patching, CISA guidance requires a forensic compromise assessment and rebuild of any appliance exposed pre-patch, not patching alone.",
+      "mitigation_gap": "Partial: a patch is available, but CISA and multiple responders documented persistence mechanisms (e.g., the NOTROBIN backdoor) that survive patching if the device was compromised beforehand; full incident-response/rebuild guidance exists but is not part of the base vendor patch. Mitigation Gap Level: Moderate.",
+      "source_urls": [
+        "https://support.citrix.com/article/CTX267027",
+        "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+        "https://nvd.nist.gov/vuln/detail/CVE-2019-19781"
+      ],
+      "retrieved_date": "2026-07-24"
+    }
+  ],
+  "failure_pattern": "An Internet-facing, pre-authentication VPN or application-delivery gateway automatically parses and acts on attacker-controlled HTTP request data (headers, fields, URI/path components) before a trusted session exists. Insufficient length, type, duplicate-field, and path-canonicalisation checks on this pre-auth input allow malformed or crafted requests to reach memory-unsafe processing code or unauthorised filesystem paths, in every case without any victim interaction.",
+  "root_cause": "input_validation_failure",
+  "vendor_mitigation": "Vendor-issued firmware/software upgrades to fixed releases are available for all three anchor CVEs, in two cases (CVE-2024-21762, CVE-2023-3519) alongside an interim workaround of disabling the affected SSL VPN service; for CVE-2019-19781, CISA additionally published a dedicated detection scanner because in-the-wild implants were found to survive simple patching.",
+  "mitigation_gap": "Across the evidence set, patch availability and fixed-version identification are consistently clear, but post-compromise recovery guidance is uneven: credential/session rotation after exposure is only partially addressed for CVE-2024-21762 and CVE-2023-3519, and CVE-2019-19781 required a CISA-mandated forensic compromise assessment and full rebuild because patching alone did not remove attacker-planted persistence. This shows that applying a vendor patch does not by itself prove a pre-authentication gateway has been returned to a trusted state.",
+  "research_question": "Can a pre-parser validation layer reject structurally invalid VPN-like requests before sensitive processing?",
+  "hypothesis": "A strict schema, length, type, duplicate-field, and canonicalisation validation layer will reject a materially higher proportion of malformed synthetic VPN-like requests than a weak baseline with incomplete schema/length/normalisation controls, while preserving acceptance of valid requests.",
+  "safety_level": "SYNTHETIC_ONLY",
+  "external_targeting": false,
+  "input_classification": "synthetic",
+  "weaponised_payloads": false,
+  "baseline_strategy": "weak_schema_length_baseline",
+  "mitigation_strategy": "strict_schema_canonicalisation_mitigation",
+  "dataset_path": "test_data/vpn/vpn_pre_auth_request_dataset.json",
+  "metrics_to_collect": [
+    "block_rate",
+    "valid_acceptance_rate",
+    "false_positive_rate",
+    "false_negative_rate",
+    "parser_reach_rate",
+    "mean_latency_ms",
+    "log_completeness_rate"
+  ],
+  "approval_status": "draft",
+  "version": "1.0.0"
+}

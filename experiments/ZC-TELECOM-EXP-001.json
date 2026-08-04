@@ -1,0 +1,96 @@
+{
+  "experiment_id": "ZC-TELECOM-EXP-001",
+  "title": "IMS/VoLTE SDP Session-Description Structural Validation and Parser Shielding",
+  "domain": "TELECOM",
+  "description": "Synthetic evaluation of whether grammar- and state-aware validation of SIP/IMS session-negotiation messages (Session Description Protocol attributes exchanged during VoLTE/IMS call setup) can reject malformed or out-of-sequence messages before they reach baseband handler code, modeled on a recurring pattern of unvalidated SDP attribute parsing documented across four related baseband CVEs from the same vendor and disclosure batch.",
+  "related_cves": [
+    {
+      "cve_id": "CVE-2023-24033",
+      "domain": "TELECOM",
+      "cvss_score": 9.8,
+      "cisa_kev": false,
+      "epss_score": 0.3455,
+      "trust_boundary": "Internet/carrier IMS network to baseband processor (no radio adjacency required)",
+      "root_cause": "parser_message_handling_failure",
+      "vendor_mitigation": "Apply Samsung's March 2023 Semiconductor Security Bulletin OTA fix via the device OEM/carrier update channel; interim workaround (Project Zero recommendation): disable Wi-Fi Calling and VoLTE to remove the reachable SDP-processing path.",
+      "mitigation_gap": "Partial: Samsung shipped an OTA fix (Google Pixel patched in the March 2023 ASPL; other OEMs lagged), but no per-OEM fixed-build mapping or baseband compromise-assessment guidance is published. Scoring note: NVD enrichment lists CVSS 9.8 Critical, while the MITRE/CNA record (following Samsung's own DoS-oriented description) lists 7.5 High - both retained per source rather than resolved to one figure.",
+      "source_urls": [
+        "https://semiconductor.samsung.com/support/quality-support/product-security-updates/cve-2023-24033/",
+        "https://projectzero.google/2023/03/multiple-internet-to-baseband-rce.html"
+      ],
+      "retrieved_date": "2026-07-24"
+    },
+    {
+      "cve_id": "CVE-2023-26496",
+      "domain": "TELECOM",
+      "cvss_score": 9.8,
+      "cisa_kev": false,
+      "epss_score": 0.2427,
+      "trust_boundary": "Internet/carrier IMS network to baseband processor",
+      "root_cause": "memory_safety_failure",
+      "vendor_mitigation": "Apply Samsung's March 2023 Semiconductor Security Bulletin OTA fix via the OEM/carrier update channel; interim workaround: disable Wi-Fi Calling/VoLTE.",
+      "mitigation_gap": "Partial: one of the four most-severe Exynos internet-to-baseband RCE CVEs in this disclosure batch. Samsung's own bulletin publishes no numeric CVSS; NVD lists 9.8 Critical while the MITRE/CNA record lists 8.6 High - retained per source.",
+      "source_urls": [
+        "https://semiconductor.samsung.com/support/quality-support/product-security-updates/cve-2023-26496/",
+        "https://projectzero.google/2023/03/multiple-internet-to-baseband-rce.html"
+      ],
+      "retrieved_date": "2026-07-24"
+    },
+    {
+      "cve_id": "CVE-2023-26497",
+      "domain": "TELECOM",
+      "cvss_score": 9.8,
+      "cisa_kev": false,
+      "epss_score": 0.2427,
+      "trust_boundary": "Internet/carrier IMS network to baseband processor",
+      "root_cause": "memory_safety_failure",
+      "vendor_mitigation": "Apply Samsung's March 2023 Semiconductor Security Bulletin OTA fix via the OEM/carrier update channel; interim workaround: disable Wi-Fi Calling/VoLTE.",
+      "mitigation_gap": "Partial: one of the four most-severe Exynos internet-to-baseband RCE CVEs in this disclosure batch. Samsung's own bulletin publishes no numeric CVSS; NVD lists 9.8 Critical while the MITRE/CNA record lists 8.6 High - retained per source.",
+      "source_urls": [
+        "https://semiconductor.samsung.com/support/quality-support/product-security-updates/cve-2023-26497/",
+        "https://projectzero.google/2023/03/multiple-internet-to-baseband-rce.html"
+      ],
+      "retrieved_date": "2026-07-24"
+    },
+    {
+      "cve_id": "CVE-2023-26498",
+      "domain": "TELECOM",
+      "cvss_score": 9.8,
+      "cisa_kev": false,
+      "epss_score": 0.2427,
+      "trust_boundary": "Internet/carrier IMS network to baseband processor",
+      "root_cause": "memory_safety_failure",
+      "vendor_mitigation": "Apply Samsung's March 2023 Semiconductor Security Bulletin OTA fix via the OEM/carrier update channel; interim workaround: disable Wi-Fi Calling/VoLTE.",
+      "mitigation_gap": "Partial: one of the four most-severe Exynos internet-to-baseband RCE CVEs in this disclosure batch. Samsung's own bulletin publishes no numeric CVSS; NVD lists 9.8 Critical, and no separate MITRE/CNA score was visible on NVD for this specific CVE at time of review.",
+      "source_urls": [
+        "https://semiconductor.samsung.com/support/quality-support/product-security-updates/cve-2023-26498/",
+        "https://projectzero.google/2023/03/multiple-internet-to-baseband-rce.html"
+      ],
+      "retrieved_date": "2026-07-24"
+    }
+  ],
+  "failure_pattern": "During VoLTE/IMS SIP-based call/session setup, a mobile baseband processor automatically parses Session Description Protocol (SDP) attributes describing the negotiated media session (e.g. accept-type, fmtp, video-configuration, chatroom property count) before any subscriber action. Insufficient length and value validation on individual SDP attributes allows a maliciously crafted session-negotiation message, delivered simply by reaching the victim's phone number over the carrier IMS network, to corrupt baseband memory - in every case without the subscriber answering or interacting with the device.",
+  "root_cause": "parser_message_handling_failure",
+  "vendor_mitigation": "Samsung shipped an OTA firmware fix via its March 2023 Semiconductor Security Bulletin, delivered through the device OEM/carrier update channel; Google Project Zero additionally recommended disabling Wi-Fi Calling and VoLTE as an interim workaround to remove the reachable SDP-processing path pending the update.",
+  "mitigation_gap": "Across all four CVEs, Samsung's own bulletin does not publish a per-OEM fixed-build mapping, so a chipset-level fix does not by itself prove an affected handset has received and is running the corrected firmware; no baseband-level compromise-assessment or forensic guidance is published for any of the four records. NVD and MITRE/CNA also disagree on severity scoring for three of the four CVEs (9.8 Critical vs 7.5-8.6 High) - both are recorded per CVE rather than resolved to a single invented figure.",
+  "research_question": "Can grammar and state-aware validation reject malformed or out-of-sequence SDP/session-description messages before baseband handler execution?",
+  "hypothesis": "A strict header-normalisation, size-limit, mandatory-field, sequence-validation and state-machine-enforcement layer will reject a materially higher proportion of malformed synthetic SDP/session-negotiation messages than a weak baseline with incomplete mandatory-field and state checks, while preserving acceptance of valid session-setup messages.",
+  "safety_level": "SYNTHETIC_ONLY",
+  "external_targeting": false,
+  "input_classification": "synthetic",
+  "weaponised_payloads": false,
+  "baseline_strategy": "weak_mandatory_field_state_baseline",
+  "mitigation_strategy": "strict_grammar_state_machine_mitigation",
+  "dataset_path": "test_data/telecom/telecom_sip_session_setup_dataset.json",
+  "metrics_to_collect": [
+    "block_rate",
+    "valid_acceptance_rate",
+    "false_positive_rate",
+    "false_negative_rate",
+    "parser_reach_rate",
+    "mean_latency_ms",
+    "log_completeness_rate"
+  ],
+  "approval_status": "draft",
+  "version": "1.0.0"
+}

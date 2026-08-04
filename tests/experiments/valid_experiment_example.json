@@ -1,0 +1,44 @@
+{
+  "experiment_id": "ZC-VPN-EXP-999",
+  "title": "Pre-Authentication SSL VPN Request Validation and Parser Shielding",
+  "domain": "VPN",
+  "description": "Synthetic evaluation of whether a pre-parser validation layer can reject structurally invalid VPN-like requests before they reach sensitive processing, modeled on pre-authentication SSL VPN request-handling weaknesses.",
+  "related_cves": [
+    {
+      "cve_id": "CVE-2024-21762",
+      "domain": "VPN",
+      "cvss_score": 9.8,
+      "cisa_kev": true,
+      "epss_score": 0.8343,
+      "trust_boundary": "Internet to pre-auth SSL VPN service",
+      "root_cause": "memory_safety_failure",
+      "vendor_mitigation": "Upgrade to fixed FortiOS versions per FG-IR-24-015 (7.4.3, 7.2.7, 7.0.14, 6.4.15, 6.2.16+); workaround: disable SSL VPN.",
+      "mitigation_gap": "Patch only / operational recovery unspecified: fixed versions and the disable-SSL-VPN workaround are clear, but the advisory gives limited guidance on post-compromise credential rotation and persistence hunting.",
+      "source_urls": [
+        "https://www.fortiguard.com/psirt/FG-IR-24-015",
+        "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+        "https://nvd.nist.gov/vuln/detail/CVE-2024-21762"
+      ],
+      "retrieved_date": "2026-07-13"
+    }
+  ],
+  "failure_pattern": "Internet-facing SSL VPN service automatically parses attacker-controlled HTTP/TLS request data before authentication, allowing malformed or oversized fields to reach memory-unsafe or under-validated processing code.",
+  "root_cause": "memory_safety_failure",
+  "vendor_mitigation": "Vendor-issued firmware/software upgrade to a fixed release, with SSL VPN disablement offered as an interim workaround.",
+  "mitigation_gap": "Patch availability does not by itself prove session or credential hygiene, or that persistence was addressed after exposure.",
+  "research_question": "Can a pre-parser validation layer reject structurally invalid VPN-like requests before sensitive processing?",
+  "hypothesis": "A strict schema, length, type, duplicate-field, and canonicalisation validation layer will reject a materially higher proportion of malformed synthetic VPN-like requests than a weak baseline, while preserving acceptance of valid requests.",
+  "safety_level": "SYNTHETIC_ONLY",
+  "baseline_strategy": "weak_schema_length_baseline",
+  "mitigation_strategy": "strict_schema_canonicalisation_mitigation",
+  "dataset_path": "test_data/vpn/vpn_pre_auth_request_dataset.json",
+  "metrics_to_collect": [
+    "block_rate",
+    "valid_acceptance_rate",
+    "false_positive_rate",
+    "false_negative_rate",
+    "parser_reach_rate",
+    "mean_latency_ms",
+    "log_completeness_rate"
+  ]
+}

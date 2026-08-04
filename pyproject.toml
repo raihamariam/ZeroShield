@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zeroshield"
+version = "0.1.0"
+description = "ZeroShield: A Sandbox-Based Validation Framework for Zero-Click Vulnerability Mitigations"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0,<3.0",
+]
+
+[project.scripts]
+zeroshield = "zeroshield.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zeroshield"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/zeroshield"]
+omit = ["src/zeroshield/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+disallow_untyped_defs = true

@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Generated run outputs (directory structure is tracked via .gitkeep; contents are not)
+results/*
+!results/.gitkeep
+overleaf_exports/*
+!overleaf_exports/.gitkeep

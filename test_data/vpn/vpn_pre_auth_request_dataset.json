@@ -1,0 +1,525 @@
+{
+  "test_set_id": "vpn-pre-auth-request-v1",
+  "version": "1.0.0",
+  "domain": "VPN",
+  "cases": [
+    {
+      "case_id": "VPN-VALID-001",
+      "category": "valid",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ]
+        ],
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic baseline valid pre-auth login request with no body",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-VALID-002",
+      "category": "valid",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Type",
+            "application/x-www-form-urlencoded"
+          ],
+          [
+            "Content-Length",
+            "42"
+          ]
+        ],
+        "declared_content_length": 42,
+        "actual_body_length": 42,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic valid pre-auth login POST with consistent declared/actual body length",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-VALID-003",
+      "category": "valid",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/fgt_lang",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Accept-Language",
+            "en-US"
+          ]
+        ],
+        "query_params": {
+          "lang": "en"
+        },
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic valid pre-auth localisation/resource request path, used as the benign counterpart to the invalid-path malformed cases in this dataset",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-VALID-004",
+      "category": "valid",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/logincheck",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Type",
+            "application/x-www-form-urlencoded"
+          ],
+          [
+            "Content-Length",
+            "58"
+          ]
+        ],
+        "declared_content_length": 58,
+        "actual_body_length": 58,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic valid pre-auth credential-check submission structure (length markers only; no real credential values are present)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-BOUNDARY-001",
+      "category": "boundary",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ]
+        ],
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic boundary case: path length exactly at the assumed maximum (256 characters), expected to remain acceptable",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-BOUNDARY-002",
+      "category": "boundary",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ]
+        ],
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic boundary case: path length one character over the assumed maximum (257 characters), expected to be rejected",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-BOUNDARY-003",
+      "category": "boundary",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "8192"
+          ]
+        ],
+        "declared_content_length": 8192,
+        "actual_body_length": 8192,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "accepted",
+      "provenance": "synthetic boundary case: declared/actual body length exactly at the assumed maximum (8192 bytes), expected to remain acceptable",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-OVERSIZED-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "5000000"
+          ]
+        ],
+        "declared_content_length": 5000000,
+        "actual_body_length": 5000000,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic oversized pre-auth body-length pattern, abstracted from CVE-2024-21762 (Fortinet FortiOS SSL VPN out-of-bounds write via a crafted pre-auth HTTP request)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-OVERSIZED-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          ]
+        ],
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic oversized header-value pattern (excessive but harmless field size), representing unbounded header-length handling weaknesses",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-OVERSIZED-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/fgt_lang",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ]
+        ],
+        "query_params": {
+          "lang": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic oversized query-parameter value pattern",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-MISMATCHED-LENGTH-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "42"
+          ]
+        ],
+        "declared_content_length": 42,
+        "actual_body_length": 4096,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic declared-shorter-than-actual body-length mismatch pattern, abstracted from HTTP request-length handling weaknesses documented across the VPN gateway evidence base",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-MISMATCHED-LENGTH-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "4096"
+          ]
+        ],
+        "declared_content_length": 4096,
+        "actual_body_length": 42,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic declared-longer-than-actual body-length mismatch pattern",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-MISMATCHED-LENGTH-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "-1"
+          ]
+        ],
+        "declared_content_length": -1,
+        "actual_body_length": 42,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic negative/invalid declared-length pattern",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-DUPLICATE-FIELD-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "42"
+          ],
+          [
+            "Content-Length",
+            "4096"
+          ]
+        ],
+        "declared_content_length": 42,
+        "actual_body_length": 42,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic duplicate Content-Length header pattern with conflicting values, a recognised HTTP request-smuggling precursor",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-DUPLICATE-FIELD-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Host",
+            "internal.synthetic.local"
+          ]
+        ],
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic duplicate Host header pattern with conflicting values",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-DUPLICATE-FIELD-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Type",
+            "application/x-www-form-urlencoded"
+          ],
+          [
+            "Content-Type",
+            "multipart/form-data"
+          ]
+        ],
+        "declared_content_length": 42,
+        "actual_body_length": 42,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic duplicate Content-Type header pattern with conflicting MIME declarations",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-UNSUPPORTED-ENCODING-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "42"
+          ]
+        ],
+        "declared_content_length": 42,
+        "actual_body_length": 42,
+        "encoding": "utf-7"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic unsupported-encoding pattern (UTF-7), representing normalisation-inconsistency weaknesses in pre-auth request handling",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-UNSUPPORTED-ENCODING-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "42"
+          ]
+        ],
+        "declared_content_length": 42,
+        "actual_body_length": 42,
+        "encoding": "cesu-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic unsupported-encoding pattern (CESU-8)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-UNSUPPORTED-ENCODING-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "POST",
+        "path": "/remote/login",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ],
+          [
+            "Content-Length",
+            "42"
+          ]
+        ],
+        "declared_content_length": 42,
+        "actual_body_length": 42,
+        "encoding": "unspecified-binary"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic unrecognised/unspecified encoding declaration pattern",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-INVALID-PATH-001",
+      "category": "malformed",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/../../internal/synthetic-config",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ]
+        ],
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic path-traversal pattern (abstracted, no real filesystem target), derived from CVE-2019-19781 (Citrix ADC/Gateway directory-traversal pre-auth RCE); the sequence targets a fictitious internal resource name, not a real system path",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-INVALID-PATH-002",
+      "category": "malformed",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/%2e%2e/%2e%2e/internal/synthetic-config",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ]
+        ],
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic URL-encoded path-traversal pattern (abstracted, no real filesystem target)",
+      "version": "1.0.0"
+    },
+    {
+      "case_id": "VPN-INVALID-PATH-003",
+      "category": "malformed",
+      "input_data": {
+        "method": "GET",
+        "path": "/remote/login%00.synthetic",
+        "headers": [
+          [
+            "Host",
+            "vpn.example.local"
+          ]
+        ],
+        "declared_content_length": 0,
+        "actual_body_length": 0,
+        "encoding": "utf-8"
+      },
+      "expected_outcome": "blocked",
+      "provenance": "synthetic percent-encoded null-byte-style path pattern (no real payload), representing legacy path-parsing weaknesses",
+      "version": "1.0.0"
+    }
+  ]
+}

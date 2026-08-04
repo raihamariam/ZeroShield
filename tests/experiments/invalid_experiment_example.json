@@ -1,0 +1,18 @@
+{
+  "experiment_id": "ZC-VPN-EXP-002",
+  "title": "",
+  "domain": "VPN",
+  "description": "Intentionally invalid experiment definition used to verify that ZeroShield model validation rejects incomplete or malformed definitions with clear, field-level errors.",
+  "related_cves": [],
+  "failure_pattern": "Example failure pattern.",
+  "root_cause": "memory_safety_failure",
+  "vendor_mitigation": "Example vendor mitigation.",
+  "mitigation_gap": "Example mitigation gap.",
+  "research_question": "Example research question?",
+  "hypothesis": "Example hypothesis.",
+  "safety_level": "SYNTHETIC_ONLY",
+  "baseline_strategy": "weak_baseline",
+  "mitigation_strategy": "strict_mitigation",
+  "dataset_path": "C:/absolute/not/allowed.json",
+  "metrics_to_collect": ["not_a_real_metric"]
+}

@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from zeroshield.dashboard import services
 from zeroshield.models import ApprovalStatus, Decision, ExperimentDefinition, TestCaseCategory
 from zeroshield.policies import ExecutionContext
 from zeroshield.runners import PolicyRefusalError
+from zeroshield.services import experiment_service as services
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXPERIMENTS_DIR = REPO_ROOT / "experiments"
@@ -96,7 +96,7 @@ def test_run_experiment_unknown_strategy_raises_dashboard_error(tmp_path: Path) 
     data["baseline_strategy"] = "totally_unknown_strategy"
     experiment = ExperimentDefinition.model_validate(data)
 
-    with pytest.raises(services.DashboardError):
+    with pytest.raises(services.ExperimentServiceError):
         services.run_experiment(
             experiment,
             execution_context=ExecutionContext.LOCAL_UNIT_TEST,
@@ -109,7 +109,7 @@ def test_run_experiment_missing_dataset_raises_dashboard_error(tmp_path: Path) -
     data["dataset_path"] = "test_data/vpn/does_not_exist.json"
     experiment = ExperimentDefinition.model_validate(data)
 
-    with pytest.raises(services.DashboardError):
+    with pytest.raises(services.ExperimentServiceError):
         services.run_experiment(
             experiment,
             execution_context=ExecutionContext.LOCAL_UNIT_TEST,

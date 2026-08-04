@@ -1,10 +1,12 @@
-"""Thin, dashboard-facing service layer over the existing ZeroShield Core.
+"""Thin application-service layer over the existing ZeroShield Core.
 
-Every function here only loads input, calls existing core functionality
-(experiments discovery/policies/orchestration/repositories/exports), and
-returns plain dataclasses for Streamlit to render. No safety, metric,
+Shared by every presentation layer (Streamlit dashboard, FastAPI, and
+conceptually the CLI). Every function here only loads input, calls existing
+core functionality (experiments discovery/policies/orchestration/
+repositories/exports), and returns plain dataclasses. No safety, metric,
 strategy, or evidence logic is re-implemented here - this module is
-presentation glue, exactly like zeroshield.cli.commands is for the CLI.
+presentation-agnostic glue, matching the "Application/orchestration layer"
+box in the ZeroShield architecture.
 """
 
 import json
@@ -32,8 +34,8 @@ from zeroshield.repositories import LocalEvidenceRepository
 from zeroshield.strategies.registry import UnknownStrategyError, resolve_strategy
 
 
-class DashboardError(Exception):
-    """Raised for any dashboard-detected failure that isn't already a core exception."""
+class ExperimentServiceError(Exception):
+    """Raised for any service-layer failure that isn't already a core exception."""
 
 
 def list_experiments(experiments_dir: Path) -> ExperimentDiscoveryResult:
@@ -72,19 +74,19 @@ def run_experiment(
 ) -> RunOutcomeSummary:
     """Run baseline+mitigation and persist evidence via the existing orchestration layer.
 
-    Raises DashboardError for dataset/strategy resolution problems, and lets
+    Raises ExperimentServiceError for dataset/strategy resolution problems, and lets
     zeroshield.runners.PolicyRefusalError propagate unchanged - the safety
     gate inside ExperimentRunner.run() is never bypassed here.
     """
     dataset_path = Path.cwd() / experiment.dataset_path
     if not dataset_path.is_file():
-        raise DashboardError(f"dataset not found: {dataset_path}")
+        raise ExperimentServiceError(f"dataset not found: {dataset_path}")
 
     try:
         baseline = resolve_strategy(experiment.baseline_strategy)
         mitigation = resolve_strategy(experiment.mitigation_strategy)
     except UnknownStrategyError as exc:
-        raise DashboardError(str(exc)) from exc
+        raise ExperimentServiceError(str(exc)) from exc
 
     stamp = int(time.time() * 1000)
     baseline_run_id = f"RUN-{stamp}01"

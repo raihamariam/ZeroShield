@@ -1,7 +1,7 @@
 """ZeroShield Demo Dashboard (Milestone 18).
 
 A Streamlit presentation/demonstration layer over the existing ZeroShield
-Core. This module only renders UI and calls zeroshield.dashboard.services,
+Core. This module only renders UI and calls zeroshield.services.experiment_service,
 which itself only calls existing core functionality (experiment discovery,
 SafetyPolicy, orchestration, repositories, exporter). No safety, strategy,
 or metric logic is implemented here - the existing core remains the source
@@ -14,11 +14,11 @@ from pathlib import Path
 
 import streamlit as st
 
-from zeroshield.dashboard import services
 from zeroshield.models import ComparisonReport, Domain, ExperimentDefinition
 from zeroshield.policies import ExecutionContext
 from zeroshield.repositories import verify_manifest_integrity
 from zeroshield.runners import PolicyRefusalError
+from zeroshield.services import experiment_service as services
 
 REPO_ROOT = Path.cwd()
 EXPERIMENTS_DIR = REPO_ROOT / "experiments"
@@ -148,7 +148,7 @@ def render_safety_and_run(experiment: ExperimentDefinition) -> None:
                 st.error("Execution was refused before any case was processed:")
                 for reason in exc.decision.reasons:
                     st.markdown(f"- {reason}")
-            except services.DashboardError as exc:
+            except services.ExperimentServiceError as exc:
                 status.update(label="Failed", state="error")
                 st.error(str(exc))
             else:

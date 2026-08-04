@@ -15,3 +15,8 @@ results/*
 !results/.gitkeep
 overleaf_exports/*
 !overleaf_exports/.gitkeep
+
+# Local Claude Code tooling (session-local, not project source)
+.claude/
+.agents/
+commands.txt

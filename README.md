@@ -2,7 +2,7 @@
 
 A Sandbox-Based Validation Framework for Zero-Click Vulnerability Mitigations — a defensive R&D prototype that converts selected VPN and Telecommunications zero-click CVE research into safe, reproducible, synthetic mitigation-validation experiments.
 
-Status: **Milestones 1–19 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, and a synchronous FastAPI REST interface. Docker, RabbitMQ, MinIO, Prometheus, and Grafana have not been started.
+Status: **Milestones 1–20 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a synchronous FastAPI REST interface, and a Docker image/Compose setup for the API and dashboard. RabbitMQ, MinIO, Prometheus, and Grafana have not been started.
 
 Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
 
@@ -120,3 +120,45 @@ Both return `404` until an experiment has actually been run at least once.
 ### 9. Stop the server
 
 Go back to the PowerShell window running uvicorn and press `Ctrl+C`.
+
+## Running ZeroShield with Docker
+
+If you have Docker Desktop installed, you can run the API and dashboard without installing Python or any dependencies on your own machine at all.
+
+### 1. Install Docker Desktop
+
+Download it from docker.com if you don't already have it, and make sure it's running (its whale icon appears in the system tray).
+
+### 2. Build and start ZeroShield
+
+```powershell
+cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
+docker compose up --build
+```
+
+The first build downloads and installs everything and can take a few minutes; later runs are much faster.
+
+### 3. Open the tools
+
+- API Swagger: `http://localhost:8000/docs`
+- Dashboard: `http://localhost:8501`
+
+They behave exactly like the non-Docker versions described above — same safety checks, same experiments, same real evidence generation.
+
+### 4. Where results go
+
+Anything ZeroShield generates while running in Docker (evidence, comparisons, Overleaf exports) is written to the same `results/` and `overleaf_exports/` folders you'd see running it directly — Docker doesn't hide or lose this data, it's shared with your project folder automatically.
+
+### 5. Stop everything
+
+```powershell
+docker compose down
+```
+
+### Using the command-line tool via Docker
+
+One-off CLI commands can be run against the same image without starting the API/dashboard, for example:
+
+```powershell
+docker run --rm zeroshield:latest zeroshield --help
+```

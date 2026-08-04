@@ -1,0 +1,36 @@
+# Runs the existing API and dashboard in containers, sharing one built image.
+# results/ and overleaf_exports/ are bind-mounted so evidence generated inside
+# a container is inspectable on the host, exactly like a non-Docker local run.
+
+services:
+  api:
+    build: .
+    image: zeroshield:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./results:/app/results
+      - ./overleaf_exports:/app/overleaf_exports
+    command: ["python", "-m", "uvicorn", "zeroshield.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  dashboard:
+    build: .
+    image: zeroshield:latest
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./results:/app/results
+      - ./overleaf_exports:/app/overleaf_exports
+    command: ["python", "-m", "streamlit", "run", "src/zeroshield/dashboard/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

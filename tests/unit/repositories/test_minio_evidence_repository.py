@@ -77,6 +77,9 @@ class _FakeMinioBackend:
         self.last_response = _FakeResponse(self.objects[(bucket, key)])
         return self.last_response
 
+    def list_objects(self, bucket: str, prefix: str = "", **kwargs: Any) -> list[str]:
+        return [key for (b, key) in self.objects if b == bucket and key.startswith(prefix)]
+
 
 @pytest.fixture
 def fake_backend() -> _FakeMinioBackend:

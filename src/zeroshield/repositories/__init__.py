@@ -3,7 +3,11 @@ from zeroshield.repositories.evidence_builder import (
     build_run_evidence,
     verify_manifest_integrity,
 )
-from zeroshield.repositories.evidence_repository import EvidenceRepository, LocalEvidenceRepository
+from zeroshield.repositories.evidence_repository import (
+    EvidenceAlreadyExistsError,
+    EvidenceRepository,
+    LocalEvidenceRepository,
+)
 
 # MinioEvidenceRepository is deliberately NOT imported here: it requires the
 # optional 'minio' package (the "storage" extra), and every existing consumer
@@ -14,6 +18,7 @@ from zeroshield.repositories.evidence_repository import EvidenceRepository, Loca
 # installed and MinIO is actually wanted.
 
 __all__ = [
+    "EvidenceAlreadyExistsError",
     "EvidenceBundle",
     "EvidenceRepository",
     "LocalEvidenceRepository",

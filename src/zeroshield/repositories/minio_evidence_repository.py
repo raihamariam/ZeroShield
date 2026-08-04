@@ -25,7 +25,10 @@ from minio.error import S3Error
 
 from zeroshield.models import ComparisonReport, EvidenceManifest
 from zeroshield.repositories.evidence_builder import EvidenceBundle
-from zeroshield.repositories.evidence_repository import EvidenceRepository
+from zeroshield.repositories.evidence_repository import (
+    EvidenceAlreadyExistsError,
+    EvidenceRepository,
+)
 
 _NOT_FOUND_CODES = {"NoSuchKey", "NoSuchObject"}
 
@@ -52,6 +55,13 @@ class MinioEvidenceRepository(EvidenceRepository):
     def save_run_evidence(self, bundle: EvidenceBundle) -> Path:
         experiment_id = bundle.manifest.experiment_id
         run_id = bundle.manifest.run_id
+        prefix = f"{experiment_id}/{run_id}/"
+        existing = self._client.list_objects(self._bucket, prefix=prefix, recursive=False)
+        if next(iter(existing), None) is not None:
+            raise EvidenceAlreadyExistsError(
+                f"evidence already exists for experiment_id='{experiment_id}' "
+                f"run_id='{run_id}'; run directories are immutable once written"
+            )
         for name, content in bundle.artefacts.items():
             self._put(self._object_key(experiment_id, run_id, name), content)
         return Path(self._bucket) / experiment_id / run_id

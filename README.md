@@ -2,7 +2,7 @@
 
 A Sandbox-Based Validation Framework for Zero-Click Vulnerability Mitigations — a defensive R&D prototype that converts selected VPN and Telecommunications zero-click CVE research into safe, reproducible, synthetic mitigation-validation experiments.
 
-Status: **Milestones 1–23, 25 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, asynchronous experiment execution via RabbitMQ and a worker process, an optional S3-compatible (MinIO) evidence storage backend alongside the default local one, Prometheus/Grafana operational monitoring, and end-to-end tests exercising the CLI, dashboard, and API/worker through their real interface boundaries. This completes the SRS's optional-infrastructure list (Docker, RabbitMQ, MinIO, Prometheus, Grafana). Milestone 24 was folded into the planned Milestone 30 (evidence repository/retention policy); Milestone 26 (security/failure-path testing) has not been started.
+Status: **Milestones 1–23, 25–26 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, asynchronous experiment execution via RabbitMQ and a worker process, an optional S3-compatible (MinIO) evidence storage backend alongside the default local one, Prometheus/Grafana operational monitoring, end-to-end tests exercising the CLI, dashboard, and API/worker through their real interface boundaries, and a dedicated security/failure-path test suite (path traversal, evidence immutability, malformed-queue-message robustness, dataset secret scanning, a static dangerous-primitive tripwire, and a dependency vulnerability scan). This completes the SRS's optional-infrastructure list (Docker, RabbitMQ, MinIO, Prometheus, Grafana). Milestone 24 was folded into the planned Milestone 30 (evidence repository/retention policy).
 
 Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
 
@@ -224,6 +224,22 @@ Then open:
 - **Grafana**: `http://localhost:3000` (login `zeroshield`/`zeroshield123`) — the "ZeroShield Operational Metrics" dashboard is pre-loaded automatically (no manual setup), showing API request rate, worker job outcomes, average job duration, and submitted-run counts.
 
 Submit a run via Swagger or the CLI, wait about 15–30 seconds for the next Prometheus scrape, then refresh the Grafana dashboard to see it reflected.
+
+## Security testing
+
+As of Milestone 26, `tests/security/` exercises the SRS's §10.3 threat model and §11.1 "Security" test level directly, alongside two fixes this milestone made to close real gaps against the SRS's own claims:
+
+- **Evidence immutability** (`test_evidence_immutability.py`) — `LocalEvidenceRepository`/`MinioEvidenceRepository` now reject a second `save_run_evidence()` call for the same `experiment_id`/`run_id` (raising `EvidenceAlreadyExistsError`) instead of silently overwriting existing evidence. `comparison.json` is deliberately exempt — it is a "latest comparison" pointer, not per-run evidence.
+- **Malformed queue message robustness** (`test_queue_message_robustness.py`) — the worker's `handle_message_body()` never raises, for a wide range of malformed/adversarial message bodies (empty, non-JSON, missing fields, invalid enum values, an embedded NUL byte, binary garbage, an oversized payload). Before this fix, a single malformed message would crash the consume loop and, since it was never acked, be redelivered and crash the worker again forever.
+- **Comprehensive path-traversal sweep** (`test_path_traversal_comprehensive.py`) — every id-accepting API route (`/experiments/{id}`, `/experiments/{id}/results`, `/experiments/{id}/evidence`, `/experiments/{id}/validate`, `/experiments/{id}/runs`, `/jobs/{id}`) against a shared list of malicious ids, plus a canary-file check proving nothing outside the sanctioned `results_root`/`jobs_dir`/`experiments_dir` is ever read back into a response.
+- **Dataset secret scanning** (`test_static_analysis_guards.py`, SAFE-006) — scans every real `experiments/*.json` and `test_data/**/*.json` file for secret-shaped strings (API keys, private key blocks, bearer tokens, generic credential assignments).
+- **Static dangerous-primitive tripwire** (`test_static_analysis_guards.py`, AC-09) — greps `src/` for `eval`/`exec`/`os.system`/`subprocess(..., shell=True)`/`pickle`/`__import__`. None exist today; this fails the build the day one is added without a deliberate, reviewed allowlist entry.
+- **Dependency vulnerability scan** (`test_dependency_vulnerabilities.py`) — runs the real `pip-audit` CLI against the installed environment. Requires outbound network access to the OSV/PyPI advisory database; skips (rather than fails) if that's unavailable, since no network is not evidence of no vulnerabilities.
+
+**Deliberately out of scope for this milestone** (testing, not infrastructure/design work):
+
+- **SAFE-005** (network egress denied by default for sandbox containers) — no sandbox container execution exists yet to test against.
+- **Cryptographic queue-payload signing** — the SRS's §10.3 "signed/validated payloads" threat-model line is currently satisfied by schema validation only (`RunJobMessage.model_validate_json`, `extra="forbid"`); message-level signing is a design addition, not something an automated test can retrofit.
 
 ## Running the tests
 

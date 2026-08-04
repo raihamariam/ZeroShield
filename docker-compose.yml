@@ -4,11 +4,15 @@
 # generated inside a container are inspectable on the host, exactly like a
 # non-Docker local run.
 #
-# RabbitMQ's AMQP port (5672) is intentionally NOT published to the host -
-# only the api/worker containers need it, over the internal compose network
-# (reachable at hostname "rabbitmq"). The management UI is published on an
-# alternate host port (15673) to avoid clashing with any other RabbitMQ
-# instance that might already be using the default 15672 on this machine.
+# RabbitMQ's AMQP port is published on the host as 5673 (not the default
+# 5672) - api/worker reach it internally via "rabbitmq:5672" on the compose
+# network regardless, but 5673 gives host-side tools (e.g. the Milestone 25
+# real-broker end-to-end test) a safe, deliberately-non-default port to
+# connect to. An earlier version of that test defaulted to localhost:5672
+# and silently connected to a completely unrelated RabbitMQ container from
+# another project that was already using the standard port on this machine.
+# The management UI is likewise on an alternate host port (15673) to avoid
+# clashing with any other RabbitMQ instance already using 15672.
 #
 # MinIO (Milestone 22) is an available, alternative EvidenceRepository
 # backend - see zeroshield.repositories.MinioEvidenceRepository - not the
@@ -33,6 +37,7 @@ services:
   rabbitmq:
     image: rabbitmq:4-management
     ports:
+      - "5673:5672"
       - "15673:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]

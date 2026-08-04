@@ -2,7 +2,7 @@
 
 A Sandbox-Based Validation Framework for Zero-Click Vulnerability Mitigations — a defensive R&D prototype that converts selected VPN and Telecommunications zero-click CVE research into safe, reproducible, synthetic mitigation-validation experiments.
 
-Status: **Milestones 1–23 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, asynchronous experiment execution via RabbitMQ and a worker process, an optional S3-compatible (MinIO) evidence storage backend alongside the default local one, and Prometheus/Grafana operational monitoring. This completes the SRS's optional-infrastructure list (Docker, RabbitMQ, MinIO, Prometheus, Grafana).
+Status: **Milestones 1–23, 25 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, asynchronous experiment execution via RabbitMQ and a worker process, an optional S3-compatible (MinIO) evidence storage backend alongside the default local one, Prometheus/Grafana operational monitoring, and end-to-end tests exercising the CLI, dashboard, and API/worker through their real interface boundaries. This completes the SRS's optional-infrastructure list (Docker, RabbitMQ, MinIO, Prometheus, Grafana). Milestone 24 was folded into the planned Milestone 30 (evidence repository/retention policy); Milestone 26 (security/failure-path testing) has not been started.
 
 Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
 
@@ -224,3 +224,22 @@ Then open:
 - **Grafana**: `http://localhost:3000` (login `zeroshield`/`zeroshield123`) — the "ZeroShield Operational Metrics" dashboard is pre-loaded automatically (no manual setup), showing API request rate, worker job outcomes, average job duration, and submitted-run counts.
 
 Submit a run via Swagger or the CLI, wait about 15–30 seconds for the next Prometheus scrape, then refresh the Grafana dashboard to see it reflected.
+
+## Running the tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
+
+This runs the full suite (unit + integration) with **no external services required** — the async/queue tests use a fake in-process publisher, exactly as the API does when tested. `tests/integration/` additionally contains real, cross-process end-to-end tests:
+
+- `test_cli_full_workflow.py` / `test_dashboard_full_workflow.py` — run automatically, no setup needed (real subprocess/real Streamlit rendering, but no external services).
+- `test_api_worker_real_broker.py` — publishes to and consumes from a **real** RabbitMQ broker instead of a fake, proving the actual message-queue mechanics work. This one is skipped by default and only runs if you explicitly opt in:
+
+  ```powershell
+  docker compose up -d rabbitmq
+  $env:ZEROSHIELD_E2E_RABBITMQ_URL = "amqp://guest:guest@localhost:5673/"
+  .\.venv\Scripts\python.exe -m pytest tests/integration/test_api_worker_real_broker.py
+  ```
+
+  It deliberately never falls back to a default host/port for this — an earlier version did, and on a machine with an unrelated RabbitMQ container already using the standard port, it silently connected to that instead of a ZeroShield broker.

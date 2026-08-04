@@ -84,6 +84,7 @@ Two `execution_context` values gate what a run is allowed to do, independent of 
 
 ## 6. Where to look next
 
+- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — the seven-layer logical architecture, design patterns, and diagrams (component, deployment, run-flow sequences) behind everything described above.
 - [`docs/CLI_REFERENCE.md`](CLI_REFERENCE.md) — every CLI command and its arguments.
 - [`docs/CONFIGURATION.md`](CONFIGURATION.md) — every environment variable and dependency extra.
 - [`docs/TESTING.md`](TESTING.md) — how to run and interpret the test suite, including the security suite and known gaps.

@@ -20,4 +20,5 @@ def test_openapi_schema_lists_all_endpoints(client: TestClient) -> None:
         "/experiments/{experiment_id}/results",
         "/experiments/{experiment_id}/evidence",
         "/jobs/{job_id}",
+        "/metrics",
     }

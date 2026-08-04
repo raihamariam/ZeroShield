@@ -2,7 +2,7 @@
 
 A Sandbox-Based Validation Framework for Zero-Click Vulnerability Mitigations — a defensive R&D prototype that converts selected VPN and Telecommunications zero-click CVE research into safe, reproducible, synthetic mitigation-validation experiments.
 
-Status: **Milestones 1–22 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, asynchronous experiment execution via RabbitMQ and a worker process, and an optional S3-compatible (MinIO) evidence storage backend alongside the default local one. Prometheus and Grafana have not been started.
+Status: **Milestones 1–23 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, asynchronous experiment execution via RabbitMQ and a worker process, an optional S3-compatible (MinIO) evidence storage backend alongside the default local one, and Prometheus/Grafana operational monitoring. This completes the SRS's optional-infrastructure list (Docker, RabbitMQ, MinIO, Prometheus, Grafana).
 
 Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
 
@@ -169,7 +169,7 @@ The first build downloads and installs everything and can take a few minutes; la
 ### 3. Open the tools
 
 - API Swagger: `http://localhost:8000/docs`
-- Dashboard: `http://localhost:8501`
+- Dashboard: `http://localhost:8502` (note: 8502, not Streamlit's usual 8501 — this avoids clashing with a locally-run, non-Docker dashboard on the same machine)
 - RabbitMQ management UI (optional, for the curious): `http://localhost:15673` (login `guest`/`guest`)
 
 They behave exactly like the non-Docker versions described above — same safety checks, same experiments, same real evidence generation.
@@ -204,3 +204,23 @@ docker compose up -d minio
 ```
 
 Then, in Python, use `zeroshield.repositories.minio_evidence_repository.default_minio_client()` (reads `MINIO_ENDPOINT`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`/`MINIO_SECURE`, defaulting to `localhost:9002` with the credentials set in `docker-compose.yml`) together with `MinioEvidenceRepository(client, bucket_name)` in place of `LocalEvidenceRepository`. The MinIO web console is at `http://localhost:9003` (login `zeroshield`/`zeroshield123`) if you want to browse stored evidence visually.
+
+## Optional: Prometheus & Grafana monitoring
+
+As of Milestone 23, the API and worker expose **operational** metrics — request counts and latency, how many runs were submitted, how many jobs completed/were denied/failed, how long jobs took. These describe how the *system* is behaving, not what an experiment found: they are always separate from, and never a substitute for, the scientific evidence under `results/` or `GET /experiments/{id}/results`.
+
+- The API serves its own metrics at `GET /metrics` (visible in Swagger).
+- The worker serves its own metrics on a separate small HTTP server, since it isn't otherwise an HTTP service.
+
+To visualise them, start the monitoring stack alongside the rest of ZeroShield:
+
+```powershell
+docker compose up -d
+```
+
+Then open:
+
+- **Prometheus**: `http://localhost:9090` — try the query `zeroshield_worker_jobs_processed_total` after running an experiment.
+- **Grafana**: `http://localhost:3000` (login `zeroshield`/`zeroshield123`) — the "ZeroShield Operational Metrics" dashboard is pre-loaded automatically (no manual setup), showing API request rate, worker job outcomes, average job duration, and submitted-run counts.
+
+Submit a run via Swagger or the CLI, wait about 15–30 seconds for the next Prometheus scrape, then refresh the Grafana dashboard to see it reflected.

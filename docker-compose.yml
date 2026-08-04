@@ -16,6 +16,18 @@
 # It is included here so it can be exercised manually; its ports are on
 # alternates (9002/9003) to avoid clashing with any other MinIO already
 # using the default 9000/9001 on this machine.
+#
+# Prometheus/Grafana (Milestone 23) scrape ONLY operational metrics (request
+# counts/latency, job outcome counts/durations) from api:8000/metrics and
+# worker:9200/metrics - never the scientific evidence, which stays under
+# results/ and GET /experiments/{id}/results. Grafana is pre-provisioned
+# with the Prometheus datasource and a small dashboard (monitoring/), so it
+# is usable immediately with no manual clicking.
+#
+# dashboard's host port is 8502 (not Streamlit's default 8501) so `docker
+# compose up` (all services) works out of the box even if something else on
+# the host - e.g. a locally-run `streamlit run` from outside Docker - is
+# already using 8501. The container's internal port is still 8501.
 
 services:
   rabbitmq:
@@ -72,6 +84,8 @@ services:
   worker:
     build: .
     image: zeroshield:latest
+    ports:
+      - "9200:9200"
     environment:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     volumes:
@@ -86,7 +100,7 @@ services:
     build: .
     image: zeroshield:latest
     ports:
-      - "8501:8501"
+      - "8502:8501"
     volumes:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports
@@ -98,5 +112,28 @@ services:
       start_period: 10s
       retries: 3
 
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: zeroshield
+      GF_SECURITY_ADMIN_PASSWORD: zeroshield123
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   minio_data:
+  prometheus_data:
+  grafana_data:

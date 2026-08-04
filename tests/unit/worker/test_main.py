@@ -26,3 +26,13 @@ def test_get_results_root_defaults_to_cwd_results() -> None:
 
 def test_get_jobs_dir_defaults_to_cwd_jobs() -> None:
     assert worker_main.get_jobs_dir() == Path.cwd() / "jobs"
+
+
+def test_get_metrics_port_default() -> None:
+    os.environ.pop("WORKER_METRICS_PORT", None)
+    assert worker_main.get_metrics_port() == 9200
+
+
+def test_get_metrics_port_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WORKER_METRICS_PORT", "9999")
+    assert worker_main.get_metrics_port() == 9999

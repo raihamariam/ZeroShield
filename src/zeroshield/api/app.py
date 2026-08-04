@@ -1,4 +1,4 @@
-"""ZeroShield REST API (Milestones 19-21).
+"""ZeroShield REST API (Milestones 19-23).
 
 A thin FastAPI interface layer over the existing ZeroShield Core, via
 zeroshield.services.experiment_service. No safety, strategy, orchestration,
@@ -13,12 +13,18 @@ POST /experiments/{id}/runs is asynchronous (Milestone 21): it queues a job
 on RabbitMQ and returns immediately. A separate zeroshield.worker process
 consumes the queue, executes the run, and is the sole place SafetyPolicy is
 evaluated for that job. Poll GET /jobs/{job_id} for status and result.
+
+GET /metrics (Milestone 23) exposes operational Prometheus metrics (request
+counts/latency, submitted-run counts) - see zeroshield.observability.metrics.
+These are never a substitute for the scientific evidence under results/ or
+GET /experiments/{id}/results.
 """
 
 from fastapi import FastAPI
 
 from zeroshield.api.errors import register_exception_handlers
-from zeroshield.api.routes import evidence, experiments, health, jobs
+from zeroshield.api.observability import PrometheusMiddleware
+from zeroshield.api.routes import evidence, experiments, health, jobs, metrics
 
 app = FastAPI(
     title="ZeroShield API",
@@ -29,11 +35,13 @@ app = FastAPI(
         "POST /experiments/{id}/runs queues a job via RabbitMQ and returns immediately; poll "
         "GET /jobs/{job_id} for status and result."
     ),
-    version="0.2.0",
+    version="0.3.0",
 )
 
+app.add_middleware(PrometheusMiddleware)
 register_exception_handlers(app)
 app.include_router(health.router)
 app.include_router(experiments.router)
 app.include_router(evidence.router)
 app.include_router(jobs.router)
+app.include_router(metrics.router)

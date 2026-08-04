@@ -1,6 +1,11 @@
 """RabbitMQ consume loop. Thin: parses each message and hands off to
 processor.process_run_job(); no execution logic lives here.
 
+Also starts a small Prometheus metrics HTTP server (Milestone 23) so an
+external Prometheus instance can scrape this process directly - the worker
+is a long-running process with no other HTTP surface, unlike the API, which
+serves GET /metrics itself.
+
 Launch with:  python -m zeroshield.worker   (or the zeroshield-worker console script)
 """
 
@@ -10,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pika
+from prometheus_client import start_http_server
 
 from zeroshield.services.job_store import RUN_JOB_QUEUE_NAME, JobStore, RunJobMessage
 from zeroshield.worker.processor import process_run_job
@@ -33,12 +39,20 @@ def get_jobs_dir() -> Path:
     return Path.cwd() / "jobs"
 
 
+def get_metrics_port() -> int:
+    return int(os.environ.get("WORKER_METRICS_PORT", "9200"))
+
+
 def main() -> None:  # pragma: no cover - requires a live RabbitMQ broker; see tests/unit/worker
     logging.basicConfig(level=logging.INFO)
 
     job_store = JobStore(get_jobs_dir())
     experiments_dir = get_experiments_dir()
     results_root = get_results_root()
+
+    metrics_port = get_metrics_port()
+    start_http_server(metrics_port)
+    logger.info("worker Prometheus metrics available on :%d/metrics", metrics_port)
 
     connection = pika.BlockingConnection(pika.URLParameters(get_rabbitmq_url()))
     channel = connection.channel()

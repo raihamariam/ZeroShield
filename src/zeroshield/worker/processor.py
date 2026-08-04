@@ -10,10 +10,15 @@ is the sole point where SafetyPolicy is evaluated; it is never bypassed here.
 """
 
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from zeroshield.experiments import find_experiment
+from zeroshield.observability.metrics import (
+    WORKER_JOB_DURATION_SECONDS,
+    WORKER_JOBS_PROCESSED_TOTAL,
+)
 from zeroshield.policies import ExecutionContext
 from zeroshield.runners import PolicyRefusalError
 from zeroshield.services import experiment_service
@@ -21,6 +26,8 @@ from zeroshield.services.experiment_service import ExperimentServiceError
 from zeroshield.services.job_store import JobRecord, JobStatus, JobStore, RunResultSummary
 
 logger = logging.getLogger("zeroshield.worker")
+
+_TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED, JobStatus.DENIED, JobStatus.FAILED})
 
 
 def process_run_job(
@@ -34,6 +41,7 @@ def process_run_job(
 ) -> None:
     existing = job_store.load(job_id)
     submitted_at = existing.submitted_at if existing is not None else datetime.now(UTC)
+    started_processing = time.perf_counter()
 
     def _record(status: JobStatus, **fields: object) -> None:
         job_store.save(
@@ -49,6 +57,9 @@ def process_run_job(
                 }
             )
         )
+        if status in _TERMINAL_STATUSES:
+            WORKER_JOBS_PROCESSED_TOTAL.labels(status=status.value).inc()
+            WORKER_JOB_DURATION_SECONDS.observe(time.perf_counter() - started_processing)
 
     _record(JobStatus.RUNNING)
 

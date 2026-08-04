@@ -1,0 +1,16 @@
+# Scrapes ZeroShield's own operational metrics endpoints (Milestone 23).
+# Never scrapes/duplicates scientific evidence - that stays in results/ and
+# GET /experiments/{id}/results, entirely separate from this.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: zeroshield_api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+
+  - job_name: zeroshield_worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker:9200"]

@@ -32,6 +32,7 @@ from zeroshield.api.schemas import (
     ValidationResponse,
 )
 from zeroshield.models import ExperimentDefinition
+from zeroshield.observability.metrics import EXPERIMENT_RUNS_SUBMITTED_TOTAL
 from zeroshield.services import experiment_service
 from zeroshield.services.job_store import JobRecord, JobStatus, JobStore, RunJobMessage
 
@@ -153,6 +154,9 @@ def submit_run(
             execution_context=request.execution_context,
         )
     )
+    EXPERIMENT_RUNS_SUBMITTED_TOTAL.labels(
+        experiment_id=experiment.experiment_id, execution_context=request.execution_context.value
+    ).inc()
     return JobSubmittedResponse(
         job_id=job_id, experiment_id=experiment.experiment_id, status=JobStatus.QUEUED.value
     )

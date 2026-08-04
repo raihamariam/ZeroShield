@@ -2,9 +2,30 @@ import json
 from pathlib import Path
 
 from zeroshield.models import ApprovalStatus
+from zeroshield.observability.metrics import (
+    WORKER_JOB_DURATION_SECONDS,
+    WORKER_JOBS_PROCESSED_TOTAL,
+)
 from zeroshield.policies import ExecutionContext
 from zeroshield.services.job_store import JobStatus, JobStore
 from zeroshield.worker.processor import process_run_job
+
+
+def _counter_value(counter: object, **labels: str) -> float:
+    labelled = counter.labels(**labels)  # type: ignore[attr-defined]
+    for family in labelled.collect():
+        for sample in family.samples:
+            if sample.name.endswith("_total"):
+                return sample.value
+    return 0.0
+
+
+def _histogram_observation_count(histogram: object) -> float:
+    for family in histogram.collect():  # type: ignore[attr-defined]
+        for sample in family.samples:
+            if sample.name.endswith("_count"):
+                return sample.value
+    return 0.0
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXPERIMENTS_DIR = REPO_ROOT / "experiments"
@@ -233,3 +254,72 @@ def test_process_run_job_preserves_submitted_at_from_existing_record(tmp_path: P
     assert record is not None
     assert record.submitted_at == original_submitted_at
     assert record.updated_at > original_submitted_at
+
+
+def test_process_run_job_completed_increments_operational_metrics(tmp_path: Path) -> None:
+    before_count = _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="completed")
+    before_observations = _histogram_observation_count(WORKER_JOB_DURATION_SECONDS)
+
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-metrics-completed",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    assert _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="completed") == before_count + 1
+    assert _histogram_observation_count(WORKER_JOB_DURATION_SECONDS) == before_observations + 1
+
+
+def test_process_run_job_denied_increments_operational_metrics(tmp_path: Path) -> None:
+    before_count = _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="denied")
+
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-metrics-denied",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.EXPERIMENT_RUN,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    assert _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="denied") == before_count + 1
+
+
+def test_process_run_job_failed_increments_operational_metrics(tmp_path: Path) -> None:
+    before_count = _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="failed")
+
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-metrics-failed",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=tmp_path / "no_such_experiments_dir",
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    assert _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="failed") == before_count + 1
+
+
+def test_process_run_job_running_status_does_not_count_as_terminal(tmp_path: Path) -> None:
+    """RUNNING is an intermediate status, recorded before the outcome is known - it must
+    never be counted as a processed/terminal job."""
+    before_completed = _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="running")
+
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-metrics-running-check",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+
+    # "running" is never a valid label value for this counter - it should stay at 0
+    assert _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="running") == before_completed == 0.0

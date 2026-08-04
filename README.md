@@ -2,7 +2,7 @@
 
 A Sandbox-Based Validation Framework for Zero-Click Vulnerability Mitigations — a defensive R&D prototype that converts selected VPN and Telecommunications zero-click CVE research into safe, reproducible, synthetic mitigation-validation experiments.
 
-Status: **Milestones 1–21 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, and asynchronous experiment execution via RabbitMQ and a worker process. MinIO, Prometheus, and Grafana have not been started.
+Status: **Milestones 1–22 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, asynchronous experiment execution via RabbitMQ and a worker process, and an optional S3-compatible (MinIO) evidence storage backend alongside the default local one. Prometheus and Grafana have not been started.
 
 Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
 
@@ -191,3 +191,16 @@ One-off CLI commands can be run against the same image without starting the API/
 ```powershell
 docker run --rm zeroshield:latest zeroshield --help
 ```
+
+## Optional: MinIO evidence storage
+
+By default, ZeroShield stores evidence (manifests, results, comparisons) as plain files under `results/`. As of Milestone 22, an S3-compatible alternative (`MinioEvidenceRepository`, in `zeroshield.repositories`) is also available, backed by [MinIO](https://min.io) — proving the evidence-storage design can be swapped without touching any research/orchestration code. It is **not** the default: the CLI, dashboard, API, and worker all still use local file storage unless you write your own script that constructs a `MinioEvidenceRepository` and passes it to `zeroshield.orchestration.execute_and_generate_evidence` yourself.
+
+To try it:
+
+```powershell
+docker compose up -d minio
+.\.venv\Scripts\python.exe -m pip install -e ".[storage,dev]"
+```
+
+Then, in Python, use `zeroshield.repositories.minio_evidence_repository.default_minio_client()` (reads `MINIO_ENDPOINT`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`/`MINIO_SECURE`, defaulting to `localhost:9002` with the credentials set in `docker-compose.yml`) together with `MinioEvidenceRepository(client, bucket_name)` in place of `LocalEvidenceRepository`. The MinIO web console is at `http://localhost:9003` (login `zeroshield`/`zeroshield123`) if you want to browse stored evidence visually.

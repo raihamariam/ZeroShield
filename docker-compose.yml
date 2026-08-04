@@ -1,13 +1,21 @@
-# Runs the existing API, dashboard, RabbitMQ, and worker in containers, api/
-# dashboard/worker sharing one built image. results/, overleaf_exports/, and
-# jobs/ are bind-mounted so evidence and job records generated inside a
-# container are inspectable on the host, exactly like a non-Docker local run.
+# Runs the existing API, dashboard, RabbitMQ, worker, and (optionally) MinIO in
+# containers, api/dashboard/worker sharing one built image. results/,
+# overleaf_exports/, and jobs/ are bind-mounted so evidence and job records
+# generated inside a container are inspectable on the host, exactly like a
+# non-Docker local run.
 #
 # RabbitMQ's AMQP port (5672) is intentionally NOT published to the host -
 # only the api/worker containers need it, over the internal compose network
 # (reachable at hostname "rabbitmq"). The management UI is published on an
 # alternate host port (15673) to avoid clashing with any other RabbitMQ
 # instance that might already be using the default 15672 on this machine.
+#
+# MinIO (Milestone 22) is an available, alternative EvidenceRepository
+# backend - see zeroshield.repositories.MinioEvidenceRepository - not the
+# default the api/worker services use (they still use the local filesystem).
+# It is included here so it can be exercised manually; its ports are on
+# alternates (9002/9003) to avoid clashing with any other MinIO already
+# using the default 9000/9001 on this machine.
 
 services:
   rabbitmq:
@@ -16,6 +24,24 @@ services:
       - "15673:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    environment:
+      MINIO_ROOT_USER: zeroshield
+      MINIO_ROOT_PASSWORD: zeroshield123
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       start_period: 20s
@@ -71,3 +97,6 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+volumes:
+  minio_data:

@@ -5,6 +5,14 @@ from zeroshield.repositories.evidence_builder import (
 )
 from zeroshield.repositories.evidence_repository import EvidenceRepository, LocalEvidenceRepository
 
+# MinioEvidenceRepository is deliberately NOT imported here: it requires the
+# optional 'minio' package (the "storage" extra), and every existing consumer
+# of this package (CLI, dashboard, API, worker) only installs "api"/
+# "dashboard"/"queue"/"dev" - eagerly importing it here would make minio a
+# hard dependency for all of them. Import it directly from
+# zeroshield.repositories.minio_evidence_repository when the storage extra is
+# installed and MinIO is actually wanted.
+
 __all__ = [
     "EvidenceBundle",
     "EvidenceRepository",

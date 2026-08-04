@@ -6,6 +6,13 @@ Status: **Milestones 1–23, 25–26 complete** — the core validation engine (
 
 Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
 
+This README covers step-by-step walkthroughs for each interface. For a narrower, more formal reference, see `docs/`:
+
+- [`docs/HANDOVER.md`](docs/HANDOVER.md) — what ZeroShield is, setup, execution, extension, and safety controls, in one place (the SRS's required "handover guide").
+- [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) — every `zeroshield` CLI command and argument.
+- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — every environment variable and dependency extra.
+- [`docs/TESTING.md`](docs/TESTING.md) — the test suite in detail, including the security suite and known gaps.
+
 ## Running the ZeroShield Dashboard
 
 ZeroShield includes a visual dashboard so you can run and inspect experiments without using the command line or reading any code. This section assumes you have never used a terminal before.

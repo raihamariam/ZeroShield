@@ -205,5 +205,5 @@ The CLI (`zeroshield` console script) is not shown as a container — it is alwa
 ## 7. What this document deliberately does not cover
 
 - A step-by-step guided walkthrough of a real experiment end-to-end — see [`docs/DEMONSTRATION.md`](DEMONSTRATION.md) (Milestone 29).
-- A requirement-by-requirement audit of which `FR-*`/`NFR-*`/`SAFE-*`/`AC-*` identifier is satisfied where — that's Milestone 30 (Final traceability and SRS compliance review).
+- A requirement-by-requirement audit of which `FR-*`/`NFR-*`/`SAFE-*`/`AC-*` identifier is satisfied where — see [`docs/TRACEABILITY.md`](TRACEABILITY.md) (Milestone 30, Final traceability and SRS compliance review).
 - Command/argument/environment-variable reference — see [`docs/CLI_REFERENCE.md`](CLI_REFERENCE.md) and [`docs/CONFIGURATION.md`](CONFIGURATION.md).

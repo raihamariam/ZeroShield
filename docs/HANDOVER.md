@@ -71,8 +71,9 @@ Every experiment run — regardless of interface — is evaluated by `SafetyPoli
 | SAFE-002 | `SYNTHETIC_ONLY` safety level requires `synthetic` input classification. |
 | SAFE-003 | `weaponised_payloads` must be `false`. |
 | SAFE-004 | Experiments must be `approved` before running outside `local_unit_test` context. |
+| SAFE-006 | Static scan of checked-in `experiments/`/`test_data/` JSON rejects secret-shaped strings (`tests/security/test_static_analysis_guards.py`). |
 
-SAFE-005 through SAFE-008 are specified in the SRS but **not yet implemented** — see [`docs/TESTING.md` § Known gaps](TESTING.md#known-gaps-not-covered-by-this-suite) for what each would require and why they're deferred.
+SAFE-005, SAFE-007 and SAFE-008 are specified in the SRS but **not fully implemented** — SAFE-008's rejection path works but isn't uniformly logged across every interface, and SAFE-005/007 have no code at all yet. See [`docs/TRACEABILITY.md` §4](TRACEABILITY.md#4-safety--policy-as-code-rules-§101) (Milestone 30) for the precise, verified status of each, and [`docs/TESTING.md` § Known gaps](TESTING.md#known-gaps-not-covered-by-this-suite) for what SAFE-005 would require and why it's deferred.
 
 Additional structural safety properties, not policy rules but enforced in code and covered by `tests/security/` (Milestone 26):
 
@@ -85,6 +86,7 @@ Two `execution_context` values gate what a run is allowed to do, independent of 
 ## 6. Where to look next
 
 - [`docs/DEMONSTRATION.md`](DEMONSTRATION.md) — a ~10-minute guided walkthrough for showing ZeroShield to a supervisor/reviewer, including a live reproducibility check.
+- [`docs/TRACEABILITY.md`](TRACEABILITY.md) — the Milestone 30 requirement-by-requirement SRS compliance review (every `FR-*`/`NFR-*`/`SAFE-*`/`AC-*`, D-05's resolution) — read this for what is and isn't actually done, verified against code rather than claimed.
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — the seven-layer logical architecture, design patterns, and diagrams (component, deployment, run-flow sequences) behind everything described above.
 - [`docs/CLI_REFERENCE.md`](CLI_REFERENCE.md) — every CLI command and its arguments.
 - [`docs/CONFIGURATION.md`](CONFIGURATION.md) — every environment variable and dependency extra.

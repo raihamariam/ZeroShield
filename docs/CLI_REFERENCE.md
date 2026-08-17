@@ -72,6 +72,29 @@ zeroshield verify-evidence results\ZC-VPN-EXP-001\RUN-1234567890
 
 This command takes a local filesystem path the operator explicitly points it at, like `cat`; it is not a network-facing or otherwise untrusted-input command, unlike the API's `experiment_id`/`job_id` path parameters (see `tests/security/test_path_traversal_comprehensive.py`).
 
+## `create-admin`
+
+Bootstrap the first ADMIN user (V2 Phase 6). There is no seeded/default
+account - this is the only way to get the first login. Requires
+`DATABASE_URL` (auth is PostgreSQL-backed, not optional). Run once per
+fresh database; running it again just creates another ADMIN.
+
+```powershell
+zeroshield create-admin --username alice --password "a strong password, 12+ characters"
+```
+
+| Argument | Required | Meaning |
+|---|---|---|
+| `--username` | yes | The new ADMIN's username. |
+| `--password` | no | Must be at least 12 characters if given. Omit it to have a strong random password generated and printed **once** - it is hashed (Argon2id) and never stored or logged anywhere in recoverable form, so write it down immediately. |
+
+Records `Action.USER_CREATED` in the audit trail with
+`actor_username="cli:create-admin"`, so a bootstrap admin is distinguishable
+from one created later via the web app's Users page by an existing ADMIN.
+See [`docs/SECURITY.md`](SECURITY.md) for the full auth/RBAC model and every
+other role (`viewer`/`researcher`/`reviewer`), which are created from the
+Users page (ADMIN-only) once the first ADMIN exists.
+
 ## Exit codes
 
 | Code | Meaning |

@@ -122,6 +122,37 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."
 
 Try `POST /vulnerabilities/{cve_id}/analyst/mitigation-gap` and `GET /vulnerabilities/{cve_id}/correlations` in Swagger, then `GET /ai-assessments` to see the persisted, `reviewed=False` result - only `POST /ai-assessments/{id}/review` marks it reviewed, never any automatic process. `POST /revalidation/scan` runs the deterministic trigger scan; `GET /controls/{id}/effectiveness` shows the aggregated trend plus a regression banner once ≥2 same-version validations exist. The `apps/web` Next.js UI (V2 Phase 4's application shell) surfaces all of this on the vulnerability, Assets, Controls, and Revalidation pages, plus a "new critical AI assessments / active regressions / pending revalidations" summary on Mission Control.
 
+### Local Authentication, RBAC, Audit, and Observability (V2 Phase 6)
+
+Every route except `GET /health`, `GET /metrics`, and `POST /auth/login`
+now requires an authenticated session - Argon2id-hashed passwords, opaque
+server-side sessions, account lockout, four roles
+(`viewer`/`researcher`/`reviewer`/`admin`) enforced per-route server-side,
+and a REVIEWER/RESEARCHER can never approve their own experiment version
+(ADMIN is an explicit override). Every security-relevant action is recorded
+in an append-only audit trail viewable at `/audit-trail` (ADMIN-only). See
+[`docs/SECURITY.md`](SECURITY.md) for the full model and the RBAC matrix.
+
+There is no seeded account - bootstrap the first ADMIN before doing
+anything else:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[api,db,auth,dev]"
+$env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\zeroshield.exe create-admin --username alice --password "a strong password, 12+ chars"
+```
+
+Then sign in at the web app's `/login` page. Everyone else (RESEARCHER,
+REVIEWER, more ADMINs) is created from the Users page by an existing ADMIN.
+
+Phase 6 also added structured JSON logging, a `request_id`/`trace_id`
+correlated across every log line and audit row for one request, and
+OpenTelemetry distributed tracing across the browser → API → RabbitMQ →
+worker hop (no exporter configured by default - spans are created but
+inert unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `ZEROSHIELD_TRACING_CONSOLE=1`
+is set). See [`docs/OBSERVABILITY.md`](OBSERVABILITY.md).
+
 ## 5. Safety controls
 
 Every experiment run — regardless of interface — is evaluated by `SafetyPolicy` (`zeroshield.policies`) before execution. This is policy-as-code, not a convention: refusal is enforced in code, not by operator discipline. Implemented rules (SRS §10.1):
@@ -147,10 +178,25 @@ Two `execution_context` values gate what a run is allowed to do, independent of 
 ## 6. Where to look next
 
 - [`docs/DEMONSTRATION.md`](DEMONSTRATION.md) — a ~10-minute guided walkthrough for showing ZeroShield to a supervisor/reviewer, including a live reproducibility check.
-- [`docs/TRACEABILITY.md`](TRACEABILITY.md) — the Milestone 30 requirement-by-requirement SRS compliance review (every `FR-*`/`NFR-*`/`SAFE-*`/`AC-*`, D-05's resolution) — read this for what is and isn't actually done, verified against code rather than claimed.
+- [`docs/SECURITY.md`](SECURITY.md) — authentication, RBAC, self-approval blocking, the audit trail, and the security test suite (V2 Phase 6).
+- [`docs/OBSERVABILITY.md`](OBSERVABILITY.md) — Prometheus metrics, structured JSON logging, and distributed tracing (V2 Phase 6).
+- [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) — CI and the finalized one-command Docker Compose release (V2 Phase 6).
+- [`docs/FUTURE_OPPORTUNITIES.md`](FUTURE_OPPORTUNITIES.md) — documentation-only notes on cloud/Kubernetes/SaaS/SSO directions, deliberately not implemented.
+- [`docs/TRACEABILITY.md`](TRACEABILITY.md) — the Milestone 30 requirement-by-requirement SRS compliance review (every `FR-*`/`NFR-*`/`SAFE-*`/`AC-*`, D-05's resolution) — read this for what is and isn't actually done, verified against code rather than claimed. Predates V2 Phase 1-6 and is left as the historical Milestone 30 snapshot rather than rewritten.
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — the seven-layer logical architecture, design patterns, and diagrams (component, deployment, run-flow sequences) behind everything described above.
 - [`docs/CLI_REFERENCE.md`](CLI_REFERENCE.md) — every CLI command and its arguments.
 - [`docs/CONFIGURATION.md`](CONFIGURATION.md) — every environment variable and dependency extra.
 - [`docs/TESTING.md`](TESTING.md) — how to run and interpret the test suite, including the security suite and known gaps.
 - [README](../README.md) — dashboard/API/Docker/MinIO/Prometheus walkthroughs.
 - `ZC_Mitigation_Validation_Framework_SRS.docx` — the authoritative requirements source; every `FR-*`/`NFR-*`/`SAFE-*`/`AC-*` identifier referenced in code and tests traces back to it.
+
+### A note on the legacy Streamlit dashboard
+
+Kept for this release (still read-only, still incapable of bypassing the
+web app's governed workflow - see [`docs/SECURITY.md` §6](SECURITY.md#6-what-phase-6-deliberately-left-alone)),
+but the Next.js web app (`apps/web/`) has been the primary interface since
+Phase 4 and is the only one with authentication. A future maintainer should
+consider retiring the dashboard outright once nobody depends on it - it
+duplicates functionality the web app already covers better, and its lack
+of a session/RBAC model is a permanent asterisk on an otherwise fully
+governed system, even though it is not itself an exploitable gap today.

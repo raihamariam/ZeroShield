@@ -12,15 +12,21 @@ Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx`
 - **Phase 2 (Threat Intelligence & Prioritisation) is complete**: automated NVD/CISA KEV/EPSS/GitHub Advisory ingestion, deduplication, field-level history, and a deterministic, explainable ZeroShield Validation Priority identifying VPN/Telecom `ValidationCandidate`s — replacing the manual CVE-to-Excel-to-experiment workflow (the workbook remains importable, never auto-executes anything). No AI. New endpoints: `GET /vulnerabilities`, `GET /priority-queue`, `GET /sources`/`/integrations`, `POST /intelligence/sync`. Requires `DATABASE_URL` (PostgreSQL is the system of record here, not optional). See [`docs/ARCHITECTURE.md` §6b](docs/ARCHITECTURE.md#6b-v2-phase-2-threat-intelligence--prioritisation) and [`docs/HANDOVER.md`](docs/HANDOVER.md#threat-intelligence--prioritisation-v2-phase-2).
 - **Phase 3 (Advanced Validation Platform) is complete**: a Domain Pack framework (VPN/Telecom, migrating the existing strategies unchanged), versioned Validation Templates, deterministic synthetic dataset generators, an Experiment Studio backend that replaces hand-authoring experiment JSON, an explicit DRAFT→READY_FOR_REVIEW→UNDER_REVIEW→APPROVED/REJECTED→RETIRED approval workflow (never bypassing `SafetyPolicy`), a strengthened local `SandboxExecutor` (allow-list, timeout, network guard, resource limits — not Kubernetes), and a deterministic, threshold-based verdict engine. New endpoints: `GET /domain-packs`, `POST /experiment-versions`, the approval-transition routes, `POST /experiment-versions/{id}/runs`, `GET /experiments/{id}/verdict`. No AI. See [`docs/ARCHITECTURE.md` §6c](docs/ARCHITECTURE.md#6c-v2-phase-3-advanced-validation-platform) and [`docs/HANDOVER.md`](docs/HANDOVER.md#advanced-validation-platform-v2-phase-3).
 - **Phase 4 (Professional Web Application) is complete**: a Next.js/React/TypeScript app (`apps/web/`) is now the primary ZeroShield interface, consuming FastAPI exclusively (never Postgres/MinIO/RabbitMQ/Python directly). Mission Control dashboard, Threat Intelligence (searchable vulnerabilities, priority queue), a multi-step Experiment Studio wizard (CVE → domain pack → template → dataset config → metrics → narrative → draft/submit), Approvals, a live SSE-driven Runs view, per-experiment Results/Verdict, an Evidence Vault, and System/Integrations/Health views. The Streamlit dashboard (below) is kept as a legacy, read-only view — its run-execution path is disabled so it can't bypass the web app's approval-gated workflow. Runs alongside the rest of the stack via `docker compose up` (port 3001) or standalone (`cd apps/web && npm run dev`). See [`apps/web/README.md`](apps/web/README.md).
+- **Phase 5 (AI & Continuous Assurance) is complete**: a strictly advisory AI Research Analyst (failure-pattern classification, mitigation-gap analysis, similarity narration grounded in deterministic CVE correlation, template recommendation, draft-experiment suggestions — every output persisted as an `AIAssessmentRecord` with `reviewed=False` until a human reviews it, never able to approve/execute/alter anything), an asset inventory, a Control/ControlVersion/ControlValidation model with effectiveness aggregation, deterministic regression detection, and a human-reviewed revalidation queue (six deterministic trigger types). No AI required — every route still works, just answering `503 ai_unavailable`, with `AI_PROVIDER` unset. See [`docs/ARCHITECTURE.md` §6d](docs/ARCHITECTURE.md#6d-v2-phase-5-ai--continuous-assurance) and [`docs/HANDOVER.md`](docs/HANDOVER.md#ai-research-analyst--continuous-assurance-v2-phase-5).
+- **Phase 6 (Hardening & Final Local V2 Release) is complete — the final implementation phase**: local authentication (Argon2id, opaque sessions, account lockout), role-based access control (`viewer`/`researcher`/`reviewer`/`admin`, no implicit hierarchy, enforced server-side on every route), self-approval blocking (a REVIEWER/RESEARCHER can never approve their own experiment version — ADMIN is an explicit override), an immutable audit trail, an extended security test suite, Prometheus/structured-JSON-logging/OpenTelemetry observability, GitHub Actions CI, a live-backend Playwright acceptance suite, and a finalized one-command Docker Compose release. See [`docs/SECURITY.md`](docs/SECURITY.md), [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md), and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 This README covers step-by-step walkthroughs for each interface. For a narrower, more formal reference, see `docs/`:
 
 - [`docs/HANDOVER.md`](docs/HANDOVER.md) — what ZeroShield is, setup, execution, extension, and safety controls, in one place (the SRS's required "handover guide").
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the seven-layer logical architecture, design patterns, component/deployment views, and run-flow sequence diagrams, each grounded in and cross-referenced to the actual code.
 - [`docs/DEMONSTRATION.md`](docs/DEMONSTRATION.md) — a ~10-minute guided walkthrough for demonstrating ZeroShield to a supervisor/reviewer, including a live reproducibility check.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — authentication, RBAC, self-approval blocking, the audit trail, and the security test suite.
+- [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) — Prometheus metrics, structured JSON logging, and distributed tracing.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — CI and the finalized one-command Docker Compose release.
+- [`docs/FUTURE_OPPORTUNITIES.md`](docs/FUTURE_OPPORTUNITIES.md) — documentation-only notes on cloud/Kubernetes/SaaS/SSO directions, deliberately not implemented.
 - [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) — every `zeroshield` CLI command and argument.
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — every environment variable and dependency extra.
-- [`docs/TESTING.md`](docs/TESTING.md) — the test suite in detail, including the security suite and known gaps.
+- [`docs/TESTING.md`](docs/TESTING.md) — the test suite in detail, including the security suite, E2E tests, and known gaps.
 - [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) — the Milestone 30 requirement-by-requirement SRS compliance review and D-05 (evidence retention policy) resolution.
 
 ## Running the ZeroShield Web Application
@@ -33,6 +39,19 @@ in [Running ZeroShield with Docker](#running-zeroshield-with-docker) below - it 
 this app alongside everything else on <http://localhost:3001>. See
 [`apps/web/README.md`](apps/web/README.md) for running it standalone (`npm run dev`)
 against an already-running API.
+
+**Signing in (V2 Phase 6):** every page requires an authenticated session -
+there is no seeded account, so the first thing to do after `docker compose up -d`
+is bootstrap an ADMIN:
+
+```powershell
+docker compose exec api zeroshield create-admin --username <you> --password "<a strong password, 12+ characters>"
+```
+
+Then open <http://localhost:3001> and sign in. Create everyone else
+(`researcher`/`reviewer`/more `admin` accounts) from the **Users** page once
+signed in as that first ADMIN. See [`docs/SECURITY.md`](docs/SECURITY.md)
+for the full role model.
 
 ## Running the ZeroShield Dashboard (legacy)
 
@@ -136,6 +155,16 @@ http://localhost:8000/docs
 
 This page lists every endpoint and lets you send real requests by clicking "Try it out" — you never need to write an HTTP request by hand.
 
+**Signing in (V2 Phase 6):** every route below except `GET /health`/`GET /metrics` now requires an authenticated session. This needs `DATABASE_URL` set for the API (see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)) and a bootstrapped ADMIN account:
+
+```powershell
+$env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\zeroshield.exe create-admin --username alice --password "a strong password, 12+ chars"
+```
+
+Then in Swagger, open **POST /auth/login** → "Try it out" → enter that username/password → "Execute". Swagger runs in your browser at `localhost:8000`, so the session cookie it receives is automatically sent with every subsequent "Try it out" call on this page for the rest of this walkthrough — no separate step needed per request.
+
 ### 6. List experiments
 
 In Swagger, open **GET /experiments** → "Try it out" → "Execute". You'll see `ZC-VPN-EXP-001` and `ZC-TELECOM-EXP-001` (or any other experiment file dropped into the `experiments/` folder — nothing is hard-coded).
@@ -194,12 +223,20 @@ cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
 docker compose up --build
 ```
 
-The first build downloads and installs everything and can take a few minutes; later runs are much faster. This starts four containers: `rabbitmq`, `api`, `worker`, and `dashboard` — a run submitted through the API here is picked up and executed automatically, with no extra steps.
+The first build downloads and installs everything and can take a few minutes; later runs are much faster. This starts every service (`postgres`, `rabbitmq`, `minio`, `api`, `worker`, `intelligence-worker`, `web`, `dashboard`, `prometheus`, `grafana`) — a run submitted through the web app or the API here is picked up and executed automatically, with no extra steps. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full service/port list and health-check details.
 
-### 3. Open the tools
+### 3. Bootstrap an ADMIN and open the tools
 
-- API Swagger: `http://localhost:8000/docs`
-- Dashboard: `http://localhost:8502` (note: 8502, not Streamlit's usual 8501 — this avoids clashing with a locally-run, non-Docker dashboard on the same machine)
+There is no seeded account (V2 Phase 6) — bootstrap the first ADMIN before signing in anywhere:
+
+```powershell
+docker compose exec api zeroshield create-admin --username <you> --password "<a strong password, 12+ characters>"
+```
+
+- **Web app** (primary UI): `http://localhost:3001` — sign in with the account just created.
+- **API Swagger**: `http://localhost:8000/docs`
+- **Dashboard** (legacy, read-only, no login): `http://localhost:8502` (note: 8502, not Streamlit's usual 8501 — this avoids clashing with a locally-run, non-Docker dashboard on the same machine)
+- **Grafana**: `http://localhost:3000` (see [Optional: Prometheus & Grafana monitoring](#optional-prometheus--grafana-monitoring) below)
 - RabbitMQ management UI (optional, for the curious): `http://localhost:15673` (login `guest`/`guest`)
 
 They behave exactly like the non-Docker versions described above — same safety checks, same experiments, same real evidence generation.
@@ -286,6 +323,12 @@ As of Milestone 26, `tests/security/` exercises the SRS's §10.3 threat model an
 
 - **SAFE-005** (network egress denied by default for sandbox containers) — no sandbox container execution exists yet to test against.
 - **Cryptographic queue-payload signing** — the SRS's §10.3 "signed/validated payloads" threat-model line is currently satisfied by schema validation only (`RunJobMessage.model_validate_json`, `extra="forbid"`); message-level signing is a design addition, not something an automated test can retrofit.
+
+**V2 Phase 6** added authentication, RBAC, and audit-trail hardening on top of the above, unweakened — four more files (`test_auth_hardening.py`, `test_rbac_hardening.py`, `test_db_backed_id_hardening.py`, `test_minio_object_key_safety.py`). See [`docs/SECURITY.md`](docs/SECURITY.md) for what each one verifies.
+
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs the full backend suite (ruff, mypy, pytest) and the full frontend suite (tsc, eslint, vitest, build, Playwright smoke tests) on every push and pull request — CI only, no deployment step. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Running the tests
 

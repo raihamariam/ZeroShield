@@ -4,6 +4,12 @@ A single, linear, ~10-minute script for demonstrating ZeroShield to a supervisor
 
 Every command below was run for real while writing this document; the output shown is genuine, not illustrative.
 
+Steps 1-6 are the original CLI-only walkthrough (still valid unchanged - the
+CLI has no session/RBAC concept, see [`docs/SECURITY.md` §6](SECURITY.md#6-what-phase-6-deliberately-left-alone)).
+**Step 7** is new (V2 Phase 6) and demonstrates the governed multi-actor
+journey - login, RBAC, self-approval blocking, and the audit trail - through
+the web app instead.
+
 Grounded in the SRS's own closeout checklist question — "Can another researcher reproduce the decision?" — and NFR-004 (Reproducibility: "Independent rerun reproduces decisions within documented tolerance").
 
 ## Prerequisites
@@ -183,6 +189,38 @@ The CLI has no export command — Overleaf export is only exposed via the dashbo
 
 Both are genuinely optional — Steps 1–5 alone are a complete, self-contained demonstration.
 
+## Step 7 (V2 Phase 6) — Login, RBAC, self-approval blocking, and the audit trail
+
+This step needs the full stack (`docker compose up -d`) rather than the
+bare CLI, since it demonstrates the governed, multi-actor web workflow.
+
+1. Bootstrap the first ADMIN (there is no seeded account):
+   ```powershell
+   docker compose exec api zeroshield create-admin --username demo-admin --password "a strong password, 12+ chars"
+   ```
+2. Open <http://localhost:3001> — you're redirected to `/login`, not
+   Mission Control. Sign in as `demo-admin`.
+3. From the **Users** page, create a `researcher` account and a `reviewer`
+   account.
+4. In a private/second browser session, sign in as the RESEARCHER and draft
+   + submit an experiment version through Experiment Studio (same flow as
+   the Phase 4 walkthrough, now attributed to that account automatically -
+   there is no "your name" field anywhere anymore, the server derives it
+   from the session).
+5. Still as the RESEARCHER, try to approve your own submission from the
+   Approvals page: **rejected** with "self-approval forbidden" - this is
+   enforced server-side (`403`), not merely a hidden button.
+6. Sign in as the REVIEWER and approve the same version - succeeds.
+7. As the ADMIN, open **Audit Trail** and filter by
+   `experiment_version.self_approval_blocked`: the rejected attempt from
+   step 5 is there, with the RESEARCHER's username, a timestamp, and a
+   `request_id` that also appears in that request's structured log line
+   (see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md)).
+
+This is the automated version of the same journey: `apps/web/e2e/workflows/phase6-acceptance.spec.ts`
+Scenario C runs steps 4-6 end-to-end via Playwright, Scenario D runs step 7 -
+see [`docs/TESTING.md`](TESTING.md#end-to-end-browser-tests-appswebe2e-playwright).
+
 ## What this demonstrated
 
 Mapped back to the SRS's own closeout checklist and Success Definition:
@@ -193,5 +231,6 @@ Mapped back to the SRS's own closeout checklist and Success Definition:
 | "Were baseline and mitigation compared fairly?" | Step 2/4 — same dataset, same runner, both modes, printed side by side. |
 | "Can another researcher reproduce the decision?" | Step 5 — independent re-run, identical decision-level metrics. |
 | "Evidence manifest verifies successfully" | Step 3. |
+| "Is approval enforced, not just recorded?" | Step 7 — self-approval rejected server-side (`403`), a different REVIEWER's approval succeeds, both recorded in the audit trail. |
 
-**Not** demonstrated here, honestly: neither bundled experiment is actually **approved** — this codebase has no automated approval workflow (`approval_status` is a field a human reviewer edits after review, per SRS §3's "Reviewer" role; see `zeroshield.policies.rules.check_safe_004_approval_status`). This walkthrough used `local_unit_test` specifically because that step — supervisor sign-off — is a human decision outside this software, not something ZeroShield itself performs.
+**Not** demonstrated in Steps 1–6, honestly: neither of the two original, hand-authored bundled experiment files (`ZC-VPN-EXP-001`/`ZC-TELECOM-EXP-001`) is actually **approved** — `approval_status` on those specific files remains a value a human reviewer edits by hand after review, per SRS §3's "Reviewer" role (see `zeroshield.policies.rules.check_safe_004_approval_status`), and this walkthrough used `local_unit_test` specifically because that supervisor sign-off is a human decision outside this software. This is no longer true of the *Studio-based* workflow, though: an `ExperimentVersion` created through Experiment Studio has a real, software-enforced, RBAC-gated `DRAFT → ... → APPROVED` state machine (V2 Phase 3, hardened with self-approval blocking and an audit trail in V2 Phase 6) — see Step 7 above, which demonstrates exactly that approval actually being enforced, not merely recorded.

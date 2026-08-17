@@ -169,10 +169,11 @@ flowchart TB
     end
 
     subgraph Containers["docker-compose.yml services"]
+        WEB["web<br/>Next.js :3001 (primary UI, V2 Phase 4)"]
         API["api<br/>FastAPI :8000"]
-        DASH["dashboard<br/>Streamlit :8502"]
+        DASH["dashboard (legacy)<br/>Streamlit :8502"]
         WORKER["worker<br/>:9200/metrics"]
-        IWORKER["intelligence-worker<br/>(zeroshield.intelligence_syncs queue)"]
+        IWORKER["intelligence-worker<br/>:9201/metrics (V2 Phase 6)"]
         MQ["rabbitmq<br/>:5673 (AMQP), :15673 (mgmt UI)"]
         MINIO["minio<br/>:9002 (S3), :9003 (console)"]
         PG["postgres<br/>:5433"]
@@ -186,6 +187,7 @@ flowchart TB
         EXPORTS["overleaf_exports/"]
     end
 
+    USER --> WEB --> API
     USER --> SWAGGER --> API
     USER --> DASH
     API --> MQ
@@ -198,17 +200,18 @@ flowchart TB
     DASH --> EXPORTS
     WORKER -.MinIO-first.-> MINIO
     DASH -.MinIO-first.-> MINIO
-    API -.run-lifecycle events.-> PG
-    WORKER -.run-lifecycle events.-> PG
+    API -.run-lifecycle + auth + audit.-> PG
+    WORKER -.run-lifecycle + audit.-> PG
     API --> MQ
     MQ --> IWORKER
     IWORKER --> PG
     PROM --> API
     PROM --> WORKER
+    PROM --> IWORKER
     GRAF --> PROM
 ```
 
-The CLI (`zeroshield` console script) is not shown as a container — it is always a local process, run directly against `results/`/`jobs/`/`experiments/` on the host, with or without Docker running.
+The CLI (`zeroshield` console script) is not shown as a container — it is always a local process, run directly against `results/`/`jobs/`/`experiments/` on the host, with or without Docker running (and, unlike every route in this diagram, has no session/RBAC concept - see [`docs/SECURITY.md`](SECURITY.md) §6). Every service that has something meaningful to check now has a Docker healthcheck, and `docker compose up`'s `depends_on: condition: service_healthy` chains order startup correctly rather than guessing with a fixed delay - see [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) for the full port table, healthcheck list, and `.env`-overridable credentials (V2 Phase 6, Step 8).
 
 ## 6a. V2 Platform Foundation: PostgreSQL run-lifecycle system of record
 
@@ -340,6 +343,48 @@ flowchart TB
 - **Revalidation engine** (`assurance.revalidation.scan`, Step 11): six deterministic trigger types - KEV-state change, material EPSS change, vendor-advisory update, unvalidated new control version, scheduled staleness, and a new deterministically-correlated CVE - each checked against state already recorded at the control's last validation, so re-running the scan never re-raises a trigger it already reported. `find_pending_candidate` prevents duplicate `RevalidationCandidate` rows per `(control_id, trigger_type)`. `POST /revalidation/{id}/approve` only flips status to `approved` - the actual run is submitted afterwards through the ordinary `POST /experiments/{id}/runs` / `POST /experiment-versions/{id}/runs` path, so nothing here can execute a run on its own.
 - **Frontend** (`apps/web`, Step 12): vulnerability detail page surfaces AI Analyst actions (failure-pattern classification, mitigation-gap, similarity narrative, template recommendation, experiment-draft suggestion) plus the deterministic correlation list ("CVE clusters"), each requiring an explicit review click before being treated as anything but advisory; `/assets` (inventory + CVE affected-assets panel), `/controls` (list + per-control effectiveness trend, regression banner, "explain with AI" action), `/revalidation` (queue + scan/approve/dismiss); Mission Control additionally surfaces unreviewed AI assessments, active regressions, and pending revalidation candidates alongside the existing priority/run/approval panels.
 - **AI safety boundary, structurally enforced**: `AIProvider`'s public surface is exactly `{is_configured, generate_structured}` (`tests/unit/ai/test_research_analyst_service.py` asserts this directly); `ResearchAnalystService`'s own source is grep-tested to never reference `subprocess`, `os.system`, `experiment_service`, `studio.approval`, or `run_experiment`. Every route that persists an AI-derived value writes it as an `AIAssessmentRecord`/`AIAssessmentORM` with `reviewed=False` - there is no code path from any AI output to a job, an approval, a verdict, or a mutated evidence file.
+
+## 6e. V2 Phase 6: Hardening & Final Local V2 Release
+
+Adds local authentication, RBAC, an immutable audit trail, and operational
+observability (metrics/logs/traces) as a layer *in front of* every route
+already built by Phases 1-5 - none of those routes' own logic changed;
+every mutation now additionally passes through session/role checks before
+reaching code that was already there:
+
+```mermaid
+flowchart TB
+    BROWSER["Browser"]
+    LOGIN["POST /auth/login<br/>Argon2id verify, enumeration-resistant"]
+    SESSION["opaque session token<br/>DB stores only its SHA-256 hash"]
+    MW["RequestContextMiddleware<br/>request_id + span (outermost)"]
+    RBAC["require_role(*roles)<br/>per-route, server-side, no hierarchy"]
+    SELFCHK["self-approval check<br/>username == created_by and role != ADMIN -&gt; 403"]
+    ROUTE["existing Phase 1-5 route logic<br/>(unchanged)"]
+    AUDIT["AuditRepository.record()<br/>append-only, one writer"]
+    MQ["RabbitMQ<br/>traceparent injected into headers"]
+    WORKER["worker / intelligence-worker<br/>traceparent extracted -&gt; child span"]
+    METRICS["Prometheus<br/>:8000/metrics, :9200, :9201"]
+    LOGS["JSON logs<br/>request_id + trace_id correlated"]
+
+    BROWSER -->|"no cookie"| LOGIN --> SESSION --> BROWSER
+    BROWSER -->|"cookie"| MW --> RBAC --> SELFCHK --> ROUTE
+    ROUTE --> AUDIT
+    ROUTE -->|"async run/sync"| MQ --> WORKER --> AUDIT
+    MW -.-> LOGS
+    WORKER -.-> LOGS
+    ROUTE -.-> METRICS
+    WORKER -.-> METRICS
+```
+
+- **Authentication** (`zeroshield.auth`, Step 1): Argon2id password hashing (`argon2-cffi`); opaque, server-generated session tokens, the database storing only a SHA-256 hash of the token (never the usable credential itself); `HttpOnly`/`SameSite=Lax` cookies; 12-hour TTL; enumeration-resistant login (a non-existent username still runs a full dummy-hash verify, identical generic error message on every failure path); account lockout after 5 failed attempts (15 minutes). `get_current_user`/`require_role(*roles)` (`zeroshield.api.dependencies`) are the only two dependencies every protected route needs - FastAPI resolves them before any body validation, so an unauthorized/wrong-role caller gets 401/403 even against a malformed request body. See [`docs/SECURITY.md`](SECURITY.md) §1-2.
+- **RBAC, no implicit hierarchy** (Step 2): four roles (`viewer`/`researcher`/`reviewer`/`admin`); every route names its exact allowed roles explicitly rather than inheriting from a rank - `docs/SECURITY.md`'s route matrix is the authoritative list. Enforcement is exclusively server-side; the frontend hides controls a role can't use, purely for UX, never as the security boundary (`tests/security/test_rbac_hardening.py` proves every mutating route independently of what the UI renders).
+- **Self-approval blocking** (Step 2): the `APPROVED` transition (`api.routes.studio._do_transition`) additionally checks `current_user.username == version.created_by and current_user.role is not Role.ADMIN`, rejecting with `403 self_approval_forbidden` and recording `EXPERIMENT_VERSION_SELF_APPROVAL_BLOCKED` - a REVIEWER/RESEARCHER can never rubber-stamp their own submission; ADMIN is an explicit, intentional override, not an oversight. `created_by`/`reviewed_by`/`actor` request-body fields were removed from every schema that used to accept them client-side - the actor is always the authenticated session's username.
+- **Immutable audit trail** (`zeroshield.audit`, Step 3): append-only `audit_events` table, one writer (`AuditRepository.record()`), covering session/user/experiment-version/run/evidence/intelligence/config/AI-review/asset/revalidation events, each with actor, target, timestamp, and a `request_id` that also appears on the `X-Request-ID` response header and every JSON log line for that request. Worker-side writes are failure-isolated exactly like the existing `RunRepository`/`AssuranceRepository` pattern - an audit-write failure can never fail a job. See [`docs/SECURITY.md`](SECURITY.md) §4 for the full action list.
+- **Security hardening & extended test suite** (Step 4): four new `tests/security/` files (auth bypass, RBAC-on-every-mutating-route, DB-backed-ID malformed-input hardening, MinIO object-key safety) on top of the unweakened Phase 1-5 suite (path traversal, evidence immutability, queue robustness, secret/dangerous-primitive static scans, dependency vulnerability scanning). See [`docs/TESTING.md`](TESTING.md) and [`docs/SECURITY.md`](SECURITY.md) §5.
+- **Observability** (`zeroshield.observability`, Step 5): Prometheus counters/histograms for API requests, worker jobs, intelligence syncs, and AI request outcomes (`GET /metrics`, plus a dedicated metrics port per worker process); structured JSON logging correlated by `request_id`/`trace_id`; OpenTelemetry tracing propagated via W3C `traceparent` injected into RabbitMQ message headers on publish and extracted on consume, so one run or sync is a single distributed trace across the browser -> API -> queue -> worker hop - with no exporter attached by default (spans are created but inert unless `OTEL_EXPORTER_OTLP_ENDPOINT`/`ZEROSHIELD_TRACING_CONSOLE=1` is set), so neither running the app nor the test suite ever requires a trace collector to be reachable. See [`docs/OBSERVABILITY.md`](OBSERVABILITY.md).
+- **CI, E2E, and release finalization** (Steps 6-8): `.github/workflows/ci.yml` (lint/type-check/test both backend and frontend on every push/PR, CI only, no deployment); a live-backend Playwright suite (`apps/web/e2e/workflows/`) covering the full Phase 4 journey plus eight V2-Phase-6-specific scenarios; a finalized one-command `docker compose up` with health checks on every service and `.env`-overridable credentials, no Redis (nothing here needs a cache/pub-sub broker beyond what RabbitMQ/Postgres already provide). See [`docs/DEPLOYMENT.md`](DEPLOYMENT.md).
+- **What deliberately stayed out of scope**: no cloud/Kubernetes/SaaS/SSO work - documented only, never implemented, in [`docs/FUTURE_OPPORTUNITIES.md`](FUTURE_OPPORTUNITIES.md) (Step 11).
 
 ## 7. What this document deliberately does not cover
 

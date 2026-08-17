@@ -22,6 +22,9 @@ Every environment variable and dependency extra ZeroShield's own code reads or r
 | `AI_PROVIDER` | `zeroshield.ai.config.resolve_ai_provider` (called by `zeroshield.api.dependencies.get_ai_provider`) | *(unset → `NullAIProvider`)* | Selects the AI Research Analyst's provider (V2 Phase 5, Step 1). Only `anthropic` currently enables a real provider (`AnthropicProvider`); any other value, or unset, resolves to `NullAIProvider`, under which every `/analyst/*` and `/controls/*/regression/explain` route still returns a normal (503 `ai_unavailable`) response rather than failing — AI is never required for core validation execution. |
 | `ANTHROPIC_API_KEY` | same | *(none)* | Required for `AI_PROVIDER=anthropic`. Missing it also degrades to `NullAIProvider` (logged at startup) rather than raising. |
 | `AI_MODEL` | same | `claude-opus-5` | Overrides the Anthropic model ID `AnthropicProvider` calls. |
+| `INTELLIGENCE_WORKER_METRICS_PORT` | intelligence-worker (`zeroshield.worker.intelligence_main.get_metrics_port`) | `9201` | Port the intelligence-worker's Prometheus metrics HTTP server listens on (V2 Phase 6, Step 5) — mirrors `WORKER_METRICS_PORT` for the run-job worker. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | API/worker/intelligence-worker (`zeroshield.observability.tracing.configure_tracing`) | *(unset → no exporter)* | Base URL of an OTLP/HTTP trace collector (Jaeger, Tempo, etc.) — `/v1/traces` is appended automatically. Unset by default so running the app or the test suite never requires a collector to be reachable. See [`docs/OBSERVABILITY.md`](OBSERVABILITY.md). |
+| `ZEROSHIELD_TRACING_CONSOLE` | same | *(unset)* | Set to `1` to print spans to stdout as JSON — a local tracing debugging aid, ignored if `OTEL_EXPORTER_OTLP_ENDPOINT` is also set. |
 
 None of these are required for local development without Docker/RabbitMQ/MinIO/PostgreSQL — the CLI, dashboard, and the synchronous parts of the API/tests all work with zero environment variables set (evidence defaults to local files, run-lifecycle events default to the no-op `NullRunRepository`).
 
@@ -32,14 +35,16 @@ Declared in `pyproject.toml`'s `[project.optional-dependencies]`. `pydantic` (co
 | Extra | Installs | Needed for |
 |---|---|---|
 | `dashboard` | `streamlit` | Running the Streamlit dashboard. |
-| `api` | `fastapi`, `uvicorn`, `prometheus-client` | Running the FastAPI REST interface. |
-| `queue` | `pika`, `prometheus-client` | Running the worker process / talking to RabbitMQ. |
+| `api` | `fastapi`, `uvicorn`, `prometheus-client`, `opentelemetry-*` | Running the FastAPI REST interface, including its Prometheus metrics and distributed tracing (V2 Phase 6, Step 5). |
+| `queue` | `pika`, `prometheus-client`, `opentelemetry-*` | Running the worker/intelligence-worker processes / talking to RabbitMQ, including their metrics and tracing. |
 | `storage` | `minio` | Constructing a `MinioEvidenceRepository` (never a hard dependency of any built-in interface — see `zeroshield/repositories/__init__.py`'s deliberate non-export). Required at runtime when `ZEROSHIELD_EVIDENCE_BACKEND=minio` is set. |
 | `db` | `sqlalchemy`, `alembic`, `psycopg[binary]` | Constructing a `PostgresRunRepository`/`VulnerabilityRepository`, and running Alembic migrations. Required at runtime when `DATABASE_URL` is set. |
 | `intelligence` | `httpx` | Running the NVD/CISA KEV/EPSS/GitHub Advisory connectors (`zeroshield.intelligence.connectors`) and the `/vulnerabilities`, `/priority-queue`, `/sources`, `/intelligence/*` API routes. |
 | `excel` | `openpyxl` | Importing the CVE research workbook (`zeroshield.intelligence.excel_importer`). |
 | `ai` | `anthropic` | Constructing a real `AnthropicProvider` (V2 Phase 5). Required at runtime when `AI_PROVIDER=anthropic` is set; without it, `AI_PROVIDER=anthropic` still degrades gracefully to `NullAIProvider` rather than crashing (`AnthropicProvider`'s SDK import is lazy). |
-| `dev` | `pytest`, `pytest-cov`, `ruff`, `mypy`, `httpx`, `pip-audit`, plus the `db`/`excel` extras' packages | Running tests, linting, type checking, and the dependency vulnerability scan. The `db`/`excel` extras' packages are included directly (not just referenced) so the full test suite runs without a separate install step. |
+| `auth` | `argon2-cffi` | Password hashing/verification (V2 Phase 6) — required for the API to serve `/auth/login` or the CLI's `create-admin` at all; not optional the way `ai`/`storage` are, since every other route requires an authenticated session. |
+| `observability` | `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-instrumentation-fastapi`, `opentelemetry-exporter-otlp-proto-http` | A standalone install path for just the tracing pieces (V2 Phase 6, Step 5) — already included by `api`/`queue` above, so you don't need this separately for a normal install. |
+| `dev` | `pytest`, `pytest-cov`, `ruff`, `mypy`, `httpx`, `pip-audit`, plus the `db`/`excel`/`auth`/`observability` extras' packages | Running tests, linting, type checking, and the dependency vulnerability scan. These packages are included directly (not just referenced) so the full test suite runs without a separate install step. |
 
 Combine extras as needed, e.g. `pip install -e ".[api,queue,dev]"` for API + worker development. The CLI (`zeroshield` console script) itself needs no extras beyond the base install.
 
@@ -57,11 +62,18 @@ These are plain paths resolved relative to the current working directory (`Path.
 
 ## Docker Compose service credentials
 
-Set directly in `docker-compose.yml`'s `environment:` blocks for the third-party images — these are not read by any ZeroShield Python code:
+Set in `docker-compose.yml`'s `environment:` blocks for the third-party
+images — these are not read by any ZeroShield Python code directly (Python
+code reads the `*_URL`/`MINIO_*` variables in the table above instead,
+which `docker-compose.yml` populates using these same values). Each is
+overridable via `.env` (see [`.env.example`](../.env.example)); every
+default below works with no `.env` file at all (V2 Phase 6, Step 8 —
+one-command release):
 
-| Service | Variables | Default |
-|---|---|---|
-| `minio` | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | `zeroshield` / `zeroshield123` (matches `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` defaults above, so the out-of-the-box MinIO client config just works). |
-| `grafana` | `GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD` | `zeroshield` / `zeroshield123`. |
+| Service | Variable | Default | Override via |
+|---|---|---|---|
+| `postgres` | `POSTGRES_PASSWORD` | `zeroshield123` | `.env`'s `POSTGRES_PASSWORD` |
+| `minio` | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | `zeroshield` / `zeroshield123` (matches `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` defaults above, so the out-of-the-box MinIO client config just works) | `.env`'s `MINIO_ROOT_PASSWORD` |
+| `grafana` | `GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD` | `zeroshield` / `zeroshield123` | `.env`'s `GRAFANA_ADMIN_PASSWORD` |
 
-Host ports are deliberately remapped away from each service's usual default (RabbitMQ AMQP on `5673` not `5672`, MinIO on `9002`/`9003` not `9000`/`9001`, dashboard on `8502` not `8501`) so `docker compose up` doesn't collide with an unrelated instance of the same software already running on the host. See the comments at the top of `docker-compose.yml` for the incident that made this a hard rule.
+Host ports are deliberately remapped away from each service's usual default (RabbitMQ AMQP on `5673` not `5672`, MinIO on `9002`/`9003` not `9000`/`9001`, dashboard on `8502` not `8501`) so `docker compose up` doesn't collide with an unrelated instance of the same software already running on the host. See the comments at the top of `docker-compose.yml` for the incident that made this a hard rule, and [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) for the full host-port table and first-time (`create-admin`) setup steps.

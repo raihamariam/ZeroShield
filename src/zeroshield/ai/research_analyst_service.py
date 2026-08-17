@@ -18,7 +18,12 @@ from datetime import UTC, datetime
 
 from pydantic import ValidationError
 
-from zeroshield.ai.provider import AIGenerationRequest, AIProvider, AIResponseError
+from zeroshield.ai.provider import (
+    AIGenerationRequest,
+    AIProvider,
+    AIResponseError,
+    AIUnavailableError,
+)
 from zeroshield.ai.schemas import (
     AIAssessmentBase,
     ExperimentDraftSuggestion,
@@ -28,6 +33,7 @@ from zeroshield.ai.schemas import (
     SimilarVulnerabilityRecommendation,
     ValidationTemplateRecommendation,
 )
+from zeroshield.observability.metrics import AI_REQUESTS_TOTAL
 
 SYSTEM_PROMPT = (
     "You are the ZeroShield Research Analyst - an advisory-only assistant embedded in a "
@@ -52,14 +58,18 @@ class ResearchAnalystService:
         self._provider = provider
 
     def _generate[T: AIAssessmentBase](self, schema_cls: type[T], schema_name: str, prompt: str, extra: dict) -> T:
-        result = self._provider.generate_structured(
-            AIGenerationRequest(
-                system=SYSTEM_PROMPT,
-                prompt=prompt,
-                json_schema=schema_cls.ai_output_schema(),
-                schema_name=schema_name,
+        try:
+            result = self._provider.generate_structured(
+                AIGenerationRequest(
+                    system=SYSTEM_PROMPT,
+                    prompt=prompt,
+                    json_schema=schema_cls.ai_output_schema(),
+                    schema_name=schema_name,
+                )
             )
-        )
+        except AIUnavailableError:
+            AI_REQUESTS_TOTAL.labels(outcome="unavailable").inc()
+            raise
         payload = {
             **result.data,
             **extra,
@@ -68,12 +78,15 @@ class ResearchAnalystService:
             "generated_at": datetime.now(UTC),
         }
         try:
-            return schema_cls.model_validate(payload)
+            validated = schema_cls.model_validate(payload)
         except ValidationError as exc:
+            AI_REQUESTS_TOTAL.labels(outcome="invalid_response").inc()
             # The AI's JSON matched the JSON Schema syntactically but violated a
             # Pydantic-level constraint (e.g. an empty `gaps` list). Never coerced
             # into a partial/guessed result.
             raise AIResponseError(f"AI response failed validation: {exc}") from exc
+        AI_REQUESTS_TOTAL.labels(outcome="success").inc()
+        return validated
 
     def classify_failure_pattern(
         self,

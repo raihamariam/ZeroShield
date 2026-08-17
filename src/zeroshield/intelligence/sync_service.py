@@ -30,6 +30,7 @@ from zeroshield.intelligence.normalisation import (
 from zeroshield.intelligence.priority import DEFAULT_WEIGHTS, PriorityWeights
 from zeroshield.intelligence.repository import VulnerabilityRepository
 from zeroshield.models.vulnerability import IntelligenceSync, IntelligenceSyncStatus
+from zeroshield.observability.metrics import INTELLIGENCE_SYNCS_TOTAL
 
 logger = logging.getLogger("zeroshield.intelligence")
 
@@ -129,6 +130,7 @@ def run_sync(
             error_summary=str(exc),
         )
         repository.save_sync(sync)
+        INTELLIGENCE_SYNCS_TOTAL.labels(source=connector.source.value, status=sync.status.value).inc()
         return sync
 
     if regenerate_candidates and touched_cve_ids:
@@ -168,4 +170,5 @@ def run_sync(
         error_summary="; ".join(error_messages[:10]) if error_messages else None,
     )
     repository.save_sync(sync)
+    INTELLIGENCE_SYNCS_TOTAL.labels(source=connector.source.value, status=sync.status.value).inc()
     return sync

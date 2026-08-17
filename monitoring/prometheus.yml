@@ -14,3 +14,8 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["worker:9200"]
+
+  - job_name: zeroshield_intelligence_worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["intelligence-worker:9201"]

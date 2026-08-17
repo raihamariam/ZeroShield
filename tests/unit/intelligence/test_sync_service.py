@@ -17,6 +17,7 @@ from zeroshield.intelligence.connectors.vendor_advisory import VendorAdvisoryCon
 from zeroshield.intelligence.repository import VulnerabilityRepository
 from zeroshield.intelligence.sync_service import run_sync
 from zeroshield.models.vulnerability import IntelligenceSyncStatus, VulnerabilitySourceName
+from zeroshield.observability.metrics import INTELLIGENCE_SYNCS_TOTAL
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXPERIMENTS_DIR = REPO_ROOT / "experiments"
@@ -117,6 +118,26 @@ def test_run_sync_empty_fetch_completes_with_zero_counts(vuln_repo: Vulnerabilit
     sync = run_sync(_FakeConnector([]), sync_id="SYNC-5", repository=vuln_repo, experiments_dir=EXPERIMENTS_DIR)
     assert sync.status is IntelligenceSyncStatus.COMPLETED
     assert sync.fetched_count == 0
+
+
+# -- INTELLIGENCE_SYNCS_TOTAL telemetry (V2 Phase 6, Step 5) - covers both
+# `return sync` sites in run_sync: the ConnectorFetchError early return and
+# the normal terminal-status return. -----------------------------------------
+
+def _syncs_total(source: str, status: str) -> float:
+    return INTELLIGENCE_SYNCS_TOTAL.labels(source=source, status=status)._value.get()  # type: ignore[attr-defined]
+
+
+def test_intelligence_syncs_total_counts_a_completed_sync(vuln_repo: VulnerabilityRepository) -> None:
+    before = _syncs_total("nvd", "completed")
+    run_sync(_FakeConnector([]), sync_id="SYNC-metrics-1", repository=vuln_repo, experiments_dir=EXPERIMENTS_DIR)
+    assert _syncs_total("nvd", "completed") == before + 1
+
+
+def test_intelligence_syncs_total_counts_a_connector_fetch_failure(vuln_repo: VulnerabilityRepository) -> None:
+    before = _syncs_total("nvd", "failed")
+    run_sync(_FailingConnector(), sync_id="SYNC-metrics-2", repository=vuln_repo, experiments_dir=EXPERIMENTS_DIR)
+    assert _syncs_total("nvd", "failed") == before + 1
 
 
 def test_run_sync_persists_queued_then_running_then_terminal_status(

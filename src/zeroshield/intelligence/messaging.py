@@ -10,6 +10,7 @@ import pika
 from pydantic import BaseModel, ConfigDict
 
 from zeroshield.models.vulnerability import VulnerabilitySourceName
+from zeroshield.observability.tracing import inject_trace_context
 
 INTELLIGENCE_SYNC_QUEUE_NAME = "zeroshield.intelligence_syncs"
 
@@ -27,11 +28,14 @@ def publish_sync_job(message: IntelligenceSyncJobMessage, *, rabbitmq_url: str) 
     try:
         channel = connection.channel()
         channel.queue_declare(queue=INTELLIGENCE_SYNC_QUEUE_NAME, durable=True)
+        headers = inject_trace_context({})
         channel.basic_publish(
             exchange="",
             routing_key=INTELLIGENCE_SYNC_QUEUE_NAME,
             body=message.model_dump_json().encode("utf-8"),
-            properties=pika.BasicProperties(delivery_mode=2, content_type="application/json"),
+            properties=pika.BasicProperties(
+                delivery_mode=2, content_type="application/json", headers=headers
+            ),
         )
     finally:
         connection.close()

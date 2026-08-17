@@ -15,12 +15,17 @@ from pathlib import Path
 from typing import Any
 
 import pika
+from opentelemetry import trace
 from prometheus_client import start_http_server
 from pydantic import ValidationError
 
+from zeroshield.observability.logging import configure_json_logging
+from zeroshield.observability.tracing import configure_tracing, extract_trace_context, get_tracer
 from zeroshield.repositories import NullRunRepository, RunRepository
 from zeroshield.services.job_store import RUN_JOB_QUEUE_NAME, JobStore, RunJobMessage
 from zeroshield.worker.processor import process_run_job
+
+_tracer = get_tracer("zeroshield.worker")
 
 logger = logging.getLogger("zeroshield.worker")
 
@@ -102,6 +107,7 @@ def handle_message_body(
     run_repository: RunRepository | None = None,
     assurance_repository: Any | None = None,
     audit_repository: Any | None = None,
+    headers: dict[str, str] | None = None,
 ) -> None:
     """Parses and processes one queue message. Never raises: a malformed or
     otherwise unprocessable message is logged and dropped rather than
@@ -116,6 +122,12 @@ def handle_message_body(
     terminal job status for each; the broad except below is a last-resort
     guard for something even it did not anticipate, e.g. the job store
     itself being unwritable. Directly testable without a broker.
+
+    `headers` carries the AMQP message headers (V2 Phase 6, Step 5) - if the
+    publisher injected a W3C traceparent (zeroshield.api.messaging), the
+    resulting span continues the same distributed trace the API request
+    started, rather than starting a disconnected one; absent/malformed
+    headers just produce a fresh root span.
     """
     try:
         message = RunJobMessage.model_validate_json(body)
@@ -124,26 +136,34 @@ def handle_message_body(
         return
 
     logger.info("processing job %s (%s)", message.job_id, message.experiment_id)
-    try:
-        process_run_job(
-            message.job_id,
-            message.experiment_id,
-            message.execution_context,
-            experiments_dir=experiments_dir,
-            results_root=results_root,
-            job_store=job_store,
-            run_repository=run_repository,
-            assurance_repository=assurance_repository,
-            audit_repository=audit_repository,
-            submitted_by_user_id=message.submitted_by_user_id,
-            submitted_by_username=message.submitted_by_username,
-        )
-    except Exception:
-        logger.exception("unexpected error processing job %s", message.job_id)
+    parent_context = extract_trace_context(headers or {})
+    with _tracer.start_as_current_span(
+        "worker.process_run_job", context=parent_context, kind=trace.SpanKind.CONSUMER
+    ) as span:
+        span.set_attribute("zeroshield.job_id", message.job_id)
+        span.set_attribute("zeroshield.experiment_id", message.experiment_id)
+        try:
+            process_run_job(
+                message.job_id,
+                message.experiment_id,
+                message.execution_context,
+                experiments_dir=experiments_dir,
+                results_root=results_root,
+                job_store=job_store,
+                run_repository=run_repository,
+                assurance_repository=assurance_repository,
+                audit_repository=audit_repository,
+                submitted_by_user_id=message.submitted_by_user_id,
+                submitted_by_username=message.submitted_by_username,
+            )
+        except Exception as exc:
+            span.record_exception(exc)
+            logger.exception("unexpected error processing job %s", message.job_id)
 
 
 def main() -> None:  # pragma: no cover - requires a live RabbitMQ broker; see tests/unit/worker
-    logging.basicConfig(level=logging.INFO)
+    configure_json_logging()
+    configure_tracing("zeroshield-worker")
 
     job_store = JobStore(get_jobs_dir())
     experiments_dir = get_experiments_dir()
@@ -174,6 +194,7 @@ def main() -> None:  # pragma: no cover - requires a live RabbitMQ broker; see t
             run_repository=run_repository,
             assurance_repository=assurance_repository,
             audit_repository=audit_repository,
+            headers=properties.headers,
         )
         ch.basic_ack(delivery_tag=method.delivery_tag)
 

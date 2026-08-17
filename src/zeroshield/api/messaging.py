@@ -2,10 +2,16 @@
 call - simple and robust for a low-traffic research API, consistent with how
 the rest of the project opens/closes file handles per operation rather than
 holding persistent state across requests.
+
+Injects the current span's W3C traceparent into the message's AMQP headers
+(V2 Phase 6, Step 5), so zeroshield.worker.main can extract it and continue
+the same distributed trace the API request started - see
+zeroshield.observability.tracing.
 """
 
 import pika
 
+from zeroshield.observability.tracing import inject_trace_context
 from zeroshield.services.job_store import RUN_JOB_QUEUE_NAME, RunJobMessage
 
 
@@ -14,11 +20,14 @@ def publish_run_job(message: RunJobMessage, *, rabbitmq_url: str) -> None:
     try:
         channel = connection.channel()
         channel.queue_declare(queue=RUN_JOB_QUEUE_NAME, durable=True)
+        headers = inject_trace_context({})
         channel.basic_publish(
             exchange="",
             routing_key=RUN_JOB_QUEUE_NAME,
             body=message.model_dump_json().encode("utf-8"),
-            properties=pika.BasicProperties(delivery_mode=2, content_type="application/json"),
+            properties=pika.BasicProperties(
+                delivery_mode=2, content_type="application/json", headers=headers
+            ),
         )
     finally:
         connection.close()

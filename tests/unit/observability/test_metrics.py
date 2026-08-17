@@ -31,6 +31,14 @@ def test_worker_job_duration_seconds_observable_without_labels() -> None:
     metrics.WORKER_JOB_DURATION_SECONDS.observe(0.001)
 
 
+def test_intelligence_syncs_total_has_expected_labels() -> None:
+    metrics.INTELLIGENCE_SYNCS_TOTAL.labels(source="cisa_kev", status="completed")
+
+
+def test_ai_requests_total_has_expected_labels() -> None:
+    metrics.AI_REQUESTS_TOTAL.labels(outcome="success")
+
+
 def test_metric_names_are_all_zeroshield_prefixed_and_distinct() -> None:
     all_metrics = [
         metrics.API_REQUESTS_TOTAL,
@@ -38,6 +46,8 @@ def test_metric_names_are_all_zeroshield_prefixed_and_distinct() -> None:
         metrics.EXPERIMENT_RUNS_SUBMITTED_TOTAL,
         metrics.WORKER_JOBS_PROCESSED_TOTAL,
         metrics.WORKER_JOB_DURATION_SECONDS,
+        metrics.INTELLIGENCE_SYNCS_TOTAL,
+        metrics.AI_REQUESTS_TOTAL,
     ]
     base_names = {m._name for m in all_metrics}  # type: ignore[attr-defined]
     assert len(base_names) == len(all_metrics)

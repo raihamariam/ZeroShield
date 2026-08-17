@@ -16,6 +16,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from zeroshield.observability.logging import request_id_var
 from zeroshield.observability.metrics import API_REQUEST_DURATION_SECONDS, API_REQUESTS_TOTAL
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -37,7 +38,11 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
         request.state.request_id = request_id
-        response = await call_next(request)
+        token = request_id_var.set(request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            request_id_var.reset(token)
         response.headers[REQUEST_ID_HEADER] = request_id
         return response
 

@@ -45,3 +45,19 @@ WORKER_JOB_DURATION_SECONDS = Histogram(
     "zeroshield_worker_job_duration_seconds",
     "Time from a job being picked up by the worker to reaching a terminal state",
 )
+
+# -- V2 Phase 6, Step 5: "useful dashboards for ... intelligence syncs and AI
+# service health if enabled" -------------------------------------------------
+
+INTELLIGENCE_SYNCS_TOTAL = Counter(
+    "zeroshield_intelligence_syncs_total",
+    "Total intelligence syncs completed, by source and terminal status",
+    ["source", "status"],
+)
+
+AI_REQUESTS_TOTAL = Counter(
+    "zeroshield_ai_requests_total",
+    "Total AI Research Analyst requests, by outcome - advisory-only telemetry, "
+    "never a substitute for the AIAssessmentRecord audit trail",
+    ["outcome"],
+)

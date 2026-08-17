@@ -21,6 +21,7 @@ GET /experiments/{id}/results.
 """
 
 from fastapi import FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from zeroshield.api.errors import register_exception_handlers
 from zeroshield.api.observability import PrometheusMiddleware, RequestContextMiddleware
@@ -39,6 +40,10 @@ from zeroshield.api.routes import (
     revalidation,
     studio,
 )
+from zeroshield.observability.logging import configure_json_logging
+from zeroshield.observability.tracing import configure_tracing
+
+configure_json_logging()
 
 app = FastAPI(
     title="ZeroShield API",
@@ -58,6 +63,14 @@ app = FastAPI(
 app.add_middleware(PrometheusMiddleware)
 app.add_middleware(RequestContextMiddleware)
 register_exception_handlers(app)
+
+# V2 Phase 6, Step 5: distributed tracing. FastAPIInstrumentor wraps the ASGI
+# app directly (not app.add_middleware), so its span is the outermost one,
+# covering RequestContextMiddleware/PrometheusMiddleware/routing/handlers -
+# the root of the browser->API leg of a run's trace (see
+# zeroshield.observability.tracing for what happens next, across RabbitMQ).
+configure_tracing("zeroshield-api")
+FastAPIInstrumentor.instrument_app(app)
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(experiments.router)

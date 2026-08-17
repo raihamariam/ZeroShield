@@ -18,6 +18,7 @@ from zeroshield.ai.provider import (
 )
 from zeroshield.ai.research_analyst_service import SYSTEM_PROMPT, ResearchAnalystService
 from zeroshield.ai.schemas import FailurePatternAssessment
+from zeroshield.observability.metrics import AI_REQUESTS_TOTAL
 
 
 class FakeAIProvider(AIProvider):
@@ -63,6 +64,47 @@ def test_null_provider_raises_ai_unavailable_never_crashes() -> None:
             cve_id="CVE-2024-00001", description="x", cvss_score=None, epss_score=None, kev_listed=False,
             domain_hint=None, candidate_failure_patterns=[],
         )
+
+
+# -- AI_REQUESTS_TOTAL outcome telemetry (V2 Phase 6, Step 5) - advisory-only,
+# never a substitute for the AIAssessmentRecord audit trail itself. -----------
+
+def _ai_requests_total(outcome: str) -> float:
+    return AI_REQUESTS_TOTAL.labels(outcome=outcome)._value.get()  # type: ignore[attr-defined]
+
+
+def test_ai_requests_total_counts_unavailable_outcome() -> None:
+    before = _ai_requests_total("unavailable")
+    service = ResearchAnalystService(NullAIProvider())
+    with pytest.raises(AIUnavailableError):
+        service.classify_failure_pattern(
+            cve_id="CVE-2024-00001", description="x", cvss_score=None, epss_score=None, kev_listed=False,
+            domain_hint=None, candidate_failure_patterns=[],
+        )
+    assert _ai_requests_total("unavailable") == before + 1
+
+
+def test_ai_requests_total_counts_invalid_response_outcome() -> None:
+    before = _ai_requests_total("invalid_response")
+    provider = FakeAIProvider(data=_valid_failure_pattern_data(confidence=1.5))
+    service = ResearchAnalystService(provider)
+    with pytest.raises(AIResponseError):
+        service.classify_failure_pattern(
+            cve_id="CVE-2024-00001", description="x", cvss_score=None, epss_score=None, kev_listed=False,
+            domain_hint=None, candidate_failure_patterns=[],
+        )
+    assert _ai_requests_total("invalid_response") == before + 1
+
+
+def test_ai_requests_total_counts_success_outcome() -> None:
+    before = _ai_requests_total("success")
+    provider = FakeAIProvider(data=_valid_failure_pattern_data())
+    service = ResearchAnalystService(provider)
+    service.classify_failure_pattern(
+        cve_id="CVE-2024-00001", description="x", cvss_score=None, epss_score=None, kev_listed=False,
+        domain_hint=None, candidate_failure_patterns=[],
+    )
+    assert _ai_requests_total("success") == before + 1
 
 
 def test_ai_unavailable_error_is_distinct_from_response_error() -> None:

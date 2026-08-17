@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, injectFakeSessionCookie, test } from "../fixtures";
 
 /**
  * This smoke tier intentionally runs against no backend (see playwright.config.ts) - it's
@@ -6,6 +6,10 @@ import { expect, test } from "@playwright/test";
  * every data-driven page must degrade to an inline ErrorState per section, never crash the
  * page or block navigation, when the ZeroShield API is unreachable.
  */
+test.beforeEach(async ({ page }) => {
+  await injectFakeSessionCookie(page);
+});
+
 const DATA_DRIVEN_ROUTES = [
   "/",
   "/vulnerabilities",

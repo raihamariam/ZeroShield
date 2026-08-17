@@ -21,6 +21,14 @@
 # runtime (unset either env var and the image falls back to local evidence /
 # NullRunRepository), but the packages must be present for the opt-in path
 # to work inside a container.
+#
+# "auth" (argon2-cffi) is required, not optional, from V2 Phase 6 onward -
+# every route except /health, /metrics, and /auth/login requires a session,
+# so a container missing this would build and start fine but fail the first
+# real login attempt. "ai" (anthropic) stays optional at runtime (unset
+# ANTHROPIC_API_KEY and the app falls back to NullAIProvider - Step 1: "Core
+# ZeroShield must still work when AI is disabled"), but is included here so
+# the opt-in path works without a separate image.
 
 FROM python:3.12-slim
 
@@ -31,7 +39,7 @@ COPY src ./src
 COPY experiments ./experiments
 COPY test_data ./test_data
 
-RUN pip install --no-cache-dir ".[api,dashboard,queue,storage,db,intelligence,excel]"
+RUN pip install --no-cache-dir ".[api,dashboard,queue,storage,db,intelligence,excel,auth,ai]"
 
 RUN mkdir -p results overleaf_exports jobs
 

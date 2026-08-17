@@ -1,4 +1,8 @@
-import { expect, test } from "@playwright/test";
+import { expect, injectFakeSessionCookie, test } from "../fixtures";
+
+test.beforeEach(async ({ page }) => {
+  await injectFakeSessionCookie(page);
+});
 
 const NAV_ROUTES: { label: string; href: string }[] = [
   { label: "Mission Control", href: "/" },

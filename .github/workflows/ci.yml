@@ -1,0 +1,85 @@
+name: CI
+
+# CI only - lint, type-check, and test the backend and frontend on every push
+# and pull request. Deliberately no deployment/publish/release steps, no
+# Docker image push (V2 Phase 6, Step 6: "CI only, no deployment").
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (ruff, mypy, pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ZeroShield with all extras
+        run: pip install -e ".[api,dashboard,queue,storage,db,intelligence,excel,auth,ai,observability,dev]"
+
+      - name: Ruff
+        run: ruff check src/ tests/
+
+      - name: Mypy
+        run: mypy src/
+
+      - name: Pytest (unit + security + policy)
+        run: pytest tests/ -q
+        env:
+          # Never set for CI - ZEROSHIELD_E2E_RABBITMQ_URL/ZEROSHIELD_E2E_POSTGRES_URL
+          # deliberately have no default, so the two real-broker/real-database
+          # integration tests self-skip; every other test needs no external
+          # service (SQLite in-memory + fakes/mocks throughout).
+          PYTHONDONTWRITEBYTECODE: "1"
+
+  frontend:
+    name: Frontend (tsc, eslint, vitest, build, e2e smoke)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E smoke tests
+        # workflows/ (RUN_E2E_LIVE=1) needs the full docker-compose stack and a
+        # seeded ADMIN account - deliberately not run in CI; see apps/web/e2e/README.md.
+        run: npm run test:e2e

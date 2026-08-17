@@ -1,4 +1,8 @@
-import { expect, test } from "@playwright/test";
+import { expect, injectFakeSessionCookie, test } from "../fixtures";
+
+test.beforeEach(async ({ page }) => {
+  await injectFakeSessionCookie(page);
+});
 
 test("an unknown route shows the themed 404 page, not a framework crash screen", async ({ page }) => {
   const response = await page.goto("/this-route-does-not-exist");

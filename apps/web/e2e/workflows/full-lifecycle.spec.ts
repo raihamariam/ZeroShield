@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, loginAsAdmin, test } from "../fixtures";
 
 /**
  * The Phase 4 brief's core acceptance scenario: view a priority CVE, create an experiment,
@@ -11,9 +11,16 @@ import { expect, test } from "@playwright/test";
  * that wrote this spec (no Docker daemon was available in that sandbox) - treat it as a
  * documented, ready-to-run scenario rather than a passing regression test until it has
  * actually been run once against a live stack.
+ *
+ * Runs as a single ADMIN account throughout (V2 Phase 6 adds session auth and blocks
+ * self-approval - REVIEWER/RESEARCHER cannot approve their own version - but ADMIN is an
+ * intentional override, so one bootstrap account can still exercise this whole single-actor
+ * journey; see e2e/workflows/phase6-acceptance.spec.ts Scenario C for the multi-actor,
+ * self-approval-blocked version of this same flow).
  */
 
 test("CVE -> Experiment Studio draft -> approve -> run -> verdict -> evidence", async ({ page }) => {
+  await loginAsAdmin(page);
   await page.goto("/priority-queue");
   const firstCveLink = page.locator("table tbody tr").first().getByRole("link").first();
   const cveId = (await firstCveLink.textContent())?.trim();
@@ -48,7 +55,6 @@ test("CVE -> Experiment Studio draft -> approve -> run -> verdict -> evidence", 
   await page.getByLabel("Mitigation gap", { exact: true }).fill("Rate limiter does not validate request shape.");
   await page.getByLabel("Research question").fill("Does the mitigation reduce malformed-request acceptance?");
   await page.getByLabel("Hypothesis").fill("The mitigation blocks more malformed cases than baseline.");
-  await page.getByLabel("Your name").fill("Playwright E2E");
   await page.getByRole("button", { name: "Next" }).click();
 
   await page.getByRole("button", { name: "Save draft" }).click();
@@ -58,7 +64,6 @@ test("CVE -> Experiment Studio draft -> approve -> run -> verdict -> evidence", 
 
   await page.getByRole("link", { name: "View version" }).click();
   await expect(page).toHaveURL(/\/approvals\//);
-  await page.getByLabel("Your name").fill("Playwright E2E Reviewer");
   await page.getByRole("button", { name: "Start review" }).click();
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText("approved", { exact: false }).first()).toBeVisible();

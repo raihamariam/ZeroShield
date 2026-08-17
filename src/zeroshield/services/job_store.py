@@ -31,13 +31,21 @@ class JobStatus(str, Enum):
 
 class RunJobMessage(BaseModel):
     """The RabbitMQ message payload: only a job_id and enough to look the
-    experiment up again - never a filesystem path or strategy identifier."""
+    experiment up again - never a filesystem path or strategy identifier.
+    `submitted_by_user_id`/`submitted_by_username` (V2 Phase 6) let the
+    worker attribute a RUN_DENIED/RUN_FAILED audit event to the real actor
+    who submitted the run - both optional so an older, already-queued
+    message (or a message from a caller that has no session, which does not
+    exist in this application, but keeps the schema forward-compatible)
+    still validates."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     job_id: str
     experiment_id: str
     execution_context: ExecutionContext
+    submitted_by_user_id: str | None = None
+    submitted_by_username: str | None = None
 
 
 class RunResultSummary(BaseModel):

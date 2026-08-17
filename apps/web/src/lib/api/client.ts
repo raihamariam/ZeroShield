@@ -35,6 +35,21 @@ function resolveBaseUrl(): string {
   return "/api";
 }
 
+/** V2 Phase 6: every route requires an authenticated session cookie. Server
+ * Components/Route Handlers call the backend directly (bypassing the
+ * next.config.ts rewrite proxy that carries cookies automatically for
+ * browser requests), so the incoming request's cookies must be forwarded
+ * by hand or every server-side fetch would be unauthenticated even when the
+ * browser holds a valid session. Client Components never need this - their
+ * same-origin "/api/*" fetch already includes the browser's cookie jar. */
+async function serverCookieHeader(): Promise<string | undefined> {
+  if (typeof window !== "undefined") return undefined;
+  const { cookies } = await import("next/headers");
+  const jar = await cookies();
+  const all = jar.getAll();
+  return all.length > 0 ? all.map((c) => `${c.name}=${c.value}`).join("; ") : undefined;
+}
+
 export type QueryParams = Record<string, string | number | boolean | undefined | null>;
 
 export interface RequestOptions {
@@ -86,12 +101,16 @@ async function parseErrorBody(response: Response): Promise<ApiErrorBody | null> 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, searchParams, signal, cache } = options;
   const url = buildUrl(path, searchParams);
+  const cookie = await serverCookieHeader();
 
   let response: Response;
   try {
     response = await fetch(url, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers: {
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal,
       cache,
@@ -114,10 +133,11 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 export async function apiFetchRaw(path: string, options: RequestOptions = {}): Promise<Response> {
   const { method = "GET", searchParams, signal, cache } = options;
   const url = buildUrl(path, searchParams);
+  const cookie = await serverCookieHeader();
 
   let response: Response;
   try {
-    response = await fetch(url, { method, signal, cache });
+    response = await fetch(url, { method, signal, cache, headers: cookie ? { Cookie: cookie } : undefined });
   } catch {
     throw new ApiError(0, null, "Could not reach the ZeroShield API. Is the backend running?");
   }

@@ -63,6 +63,20 @@ def get_assurance_repository() -> Any | None:
     return AssuranceRepository(build_sessionmaker())
 
 
+def get_audit_repository() -> Any | None:
+    """Builds an AuditRepository (V2 Phase 6) if DATABASE_URL is configured,
+    else None - same optional/auxiliary reasoning as get_assurance_repository
+    above; see zeroshield.worker.processor._audit."""
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return None
+
+    from zeroshield.audit.repository import AuditRepository
+    from zeroshield.db.session import build_sessionmaker
+
+    return AuditRepository(build_sessionmaker())
+
+
 def get_experiments_dir() -> Path:
     return Path.cwd() / "experiments"
 
@@ -87,6 +101,7 @@ def handle_message_body(
     job_store: JobStore,
     run_repository: RunRepository | None = None,
     assurance_repository: Any | None = None,
+    audit_repository: Any | None = None,
 ) -> None:
     """Parses and processes one queue message. Never raises: a malformed or
     otherwise unprocessable message is logged and dropped rather than
@@ -119,6 +134,9 @@ def handle_message_body(
             job_store=job_store,
             run_repository=run_repository,
             assurance_repository=assurance_repository,
+            audit_repository=audit_repository,
+            submitted_by_user_id=message.submitted_by_user_id,
+            submitted_by_username=message.submitted_by_username,
         )
     except Exception:
         logger.exception("unexpected error processing job %s", message.job_id)
@@ -132,6 +150,7 @@ def main() -> None:  # pragma: no cover - requires a live RabbitMQ broker; see t
     results_root = get_results_root()
     run_repository = get_run_repository()
     assurance_repository = get_assurance_repository()
+    audit_repository = get_audit_repository()
 
     metrics_port = get_metrics_port()
     start_http_server(metrics_port)
@@ -154,6 +173,7 @@ def main() -> None:  # pragma: no cover - requires a live RabbitMQ broker; see t
             job_store=job_store,
             run_repository=run_repository,
             assurance_repository=assurance_repository,
+            audit_repository=audit_repository,
         )
         ch.basic_ack(delivery_tag=method.delivery_tag)
 

@@ -11,9 +11,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from tests.unit.api.conftest import fake_user
 
 from zeroshield.api import dependencies
 from zeroshield.api.app import app
+from zeroshield.audit.repository import AuditRepository
+from zeroshield.auth.models import Role
 from zeroshield.db.base import Base
 from zeroshield.services.job_store import RunJobMessage
 from zeroshield.studio.repository import ExperimentVersionRepository
@@ -57,17 +60,33 @@ def published_messages() -> list[RunJobMessage]:
 
 
 @pytest.fixture
+def audit_repo() -> AuditRepository:
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True
+    )
+    Base.metadata.create_all(engine)
+    return AuditRepository(sessionmaker(bind=engine, expire_on_commit=False, future=True))
+
+
+@pytest.fixture
 def client(
     version_repo: ExperimentVersionRepository,
     studio_experiments_dir: Path,
     dataset_root: Path,
     published_messages: list[RunJobMessage],
+    audit_repo: AuditRepository,
 ) -> Iterator[TestClient]:
     app.dependency_overrides[dependencies.get_experiment_version_repository] = lambda: version_repo
     app.dependency_overrides[dependencies.get_experiments_dir] = lambda: studio_experiments_dir
     app.dependency_overrides[dependencies.get_results_root] = lambda: dataset_root / "results"
     app.dependency_overrides[dependencies.get_jobs_dir] = lambda: dataset_root / "jobs"
     app.dependency_overrides[dependencies.get_publisher] = lambda: published_messages.append
+    app.dependency_overrides[dependencies.get_audit_repository] = lambda: audit_repo
+    # ADMIN by default - can create/edit/submit/review/approve/run without ever
+    # hitting an RBAC 403, so tests that aren't themselves about RBAC don't need
+    # to think about roles. test_self_approval_is_blocked_for_a_researcher below
+    # overrides this per-call to exercise the actual role/identity boundaries.
+    app.dependency_overrides[dependencies.get_current_user] = lambda: fake_user()
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -79,7 +98,7 @@ def _create_version_payload(**overrides: object) -> dict:
         "related_cves": [VPN_CVE_PAYLOAD], "domain_pack_id": "vpn", "template_id": "vpn_schema_canonicalisation",
         "template_version": "1.0.0", "dataset_config": {"oversized_count": 2, "invalid_path_count": 2},
         "seed": 5, "failure_pattern": "p", "root_cause": "memory_safety_failure", "vendor_mitigation": "x",
-        "mitigation_gap": "x", "research_question": "q?", "hypothesis": "h", "created_by": "researcher1",
+        "mitigation_gap": "x", "research_question": "q?", "hypothesis": "h",
     }
     payload.update(overrides)
     return payload
@@ -176,13 +195,13 @@ def test_full_approval_workflow_via_api(
 ) -> None:
     version_id = client.post("/experiment-versions", json=_create_version_payload()).json()["version_id"]
 
-    r = client.post(f"/experiment-versions/{version_id}/submit-review", json={"actor": "researcher1"})
+    r = client.post(f"/experiment-versions/{version_id}/submit-review", json={})
     assert r.status_code == 200 and r.json()["status"] == "ready_for_review"
 
-    r = client.post(f"/experiment-versions/{version_id}/start-review", json={"actor": "reviewer1"})
+    r = client.post(f"/experiment-versions/{version_id}/start-review", json={})
     assert r.status_code == 200 and r.json()["status"] == "under_review"
 
-    r = client.post(f"/experiment-versions/{version_id}/approve", json={"actor": "reviewer1", "reason": "ok"})
+    r = client.post(f"/experiment-versions/{version_id}/approve", json={"reason": "ok"})
     assert r.status_code == 200 and r.json()["status"] == "approved"
     assert (studio_experiments_dir / "ZC-VPN-EXP-960.json").is_file()
 
@@ -198,7 +217,7 @@ def test_full_approval_workflow_via_api(
 
 def test_invalid_transition_returns_409(client: TestClient) -> None:
     version_id = client.post("/experiment-versions", json=_create_version_payload()).json()["version_id"]
-    response = client.post(f"/experiment-versions/{version_id}/approve", json={"actor": "attacker"})
+    response = client.post(f"/experiment-versions/{version_id}/approve", json={})
     assert response.status_code == 409
     assert response.json()["detail"]["error"] == "invalid_transition"
 
@@ -219,13 +238,56 @@ def test_list_experiment_versions_filters(client: TestClient) -> None:
 
 def test_reject_workflow(client: TestClient) -> None:
     version_id = client.post("/experiment-versions", json=_create_version_payload()).json()["version_id"]
-    client.post(f"/experiment-versions/{version_id}/submit-review", json={"actor": "researcher1"})
-    client.post(f"/experiment-versions/{version_id}/start-review", json={"actor": "reviewer1"})
-    response = client.post(
-        f"/experiment-versions/{version_id}/reject", json={"actor": "reviewer1", "reason": "insufficient"}
-    )
+    client.post(f"/experiment-versions/{version_id}/submit-review", json={})
+    client.post(f"/experiment-versions/{version_id}/start-review", json={})
+    response = client.post(f"/experiment-versions/{version_id}/reject", json={"reason": "insufficient"})
     assert response.status_code == 200
     assert response.json()["status"] == "rejected"
+
+
+def test_self_approval_is_blocked_for_a_researcher(client: TestClient) -> None:
+    """Step 2: 'Where practical, a Researcher must not approve their own
+    experiment.' Enforced on the authenticated actor, never a client-supplied
+    name - creates a version as one identity, then attempts to approve it as
+    that SAME identity (now holding REVIEWER permissions too, the only way
+    the approve route would let them try at all), and confirms it is refused
+    even though the role check alone would have allowed it."""
+    researcher = fake_user(Role.RESEARCHER, username="dual-role-alice", user_id="USER-alice")
+    other_reviewer = fake_user(Role.REVIEWER, username="bob", user_id="USER-bob")
+    alice_as_reviewer = fake_user(Role.REVIEWER, username="dual-role-alice", user_id="USER-alice")
+
+    app.dependency_overrides[dependencies.get_current_user] = lambda: researcher
+    version_id = client.post("/experiment-versions", json=_create_version_payload()).json()["version_id"]
+    assert client.post(f"/experiment-versions/{version_id}/submit-review", json={}).status_code == 200
+
+    app.dependency_overrides[dependencies.get_current_user] = lambda: other_reviewer
+    assert client.post(f"/experiment-versions/{version_id}/start-review", json={}).status_code == 200
+
+    app.dependency_overrides[dependencies.get_current_user] = lambda: alice_as_reviewer
+    blocked = client.post(f"/experiment-versions/{version_id}/approve", json={})
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"]["error"] == "self_approval_forbidden"
+
+    app.dependency_overrides[dependencies.get_current_user] = lambda: other_reviewer
+    approved = client.post(f"/experiment-versions/{version_id}/approve", json={})
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+
+
+def test_researcher_cannot_approve_even_a_different_researchers_version(client: TestClient) -> None:
+    """RBAC alone (not just self-approval) must block a RESEARCHER from
+    approving anything - approve requires REVIEWER/ADMIN."""
+    researcher = fake_user(Role.RESEARCHER, username="alice", user_id="USER-alice")
+    another_researcher = fake_user(Role.RESEARCHER, username="carol", user_id="USER-carol")
+
+    app.dependency_overrides[dependencies.get_current_user] = lambda: researcher
+    version_id = client.post("/experiment-versions", json=_create_version_payload()).json()["version_id"]
+    client.post(f"/experiment-versions/{version_id}/submit-review", json={})
+
+    app.dependency_overrides[dependencies.get_current_user] = lambda: another_researcher
+    response = client.post(f"/experiment-versions/{version_id}/start-review", json={})
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "forbidden"
 
 
 # -- verdict ------------------------------------------------------------------

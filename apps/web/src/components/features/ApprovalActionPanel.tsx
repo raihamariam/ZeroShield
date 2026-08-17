@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { FormField, Input, Textarea } from "@/components/ui/Field";
+import { FormField, Textarea } from "@/components/ui/Field";
 import { studioApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import type { ExperimentVersionStatus } from "@/lib/api/types";
@@ -22,7 +22,7 @@ const ACTIONS_BY_STATUS: Record<ExperimentVersionStatus, { action: Action; label
   retired: [],
 };
 
-const TRANSITIONS: Record<Action, (versionId: string, request: { actor: string; reason?: string | null }) => Promise<unknown>> = {
+const TRANSITIONS: Record<Action, (versionId: string, request: { reason?: string | null }) => Promise<unknown>> = {
   "submit-review": studioApi.submitVersionForReview,
   "start-review": studioApi.startVersionReview,
   approve: studioApi.approveVersion,
@@ -32,7 +32,6 @@ const TRANSITIONS: Record<Action, (versionId: string, request: { actor: string; 
 
 export function ApprovalActionPanel({ versionId, status }: { versionId: string; status: ExperimentVersionStatus }) {
   const router = useRouter();
-  const [actor, setActor] = useState(() => (typeof window !== "undefined" ? window.localStorage.getItem("zeroshield.createdBy") ?? "" : ""));
   const [reason, setReason] = useState("");
   const [pending, setPending] = useState<Action | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,18 +42,17 @@ export function ApprovalActionPanel({ versionId, status }: { versionId: string; 
   }
 
   async function handle(action: Action) {
-    if (!actor.trim()) {
-      setError("Enter your name first.");
-      return;
-    }
     setPending(action);
     setError(null);
     try {
-      window.localStorage.setItem("zeroshield.createdBy", actor.trim());
-      await TRANSITIONS[action](versionId, { actor: actor.trim(), reason: reason.trim() || null });
+      await TRANSITIONS[action](versionId, { reason: reason.trim() || null });
       router.refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Action failed.");
+      if (err instanceof ApiError && err.status === 403 && err.body?.error === "self_approval_forbidden") {
+        setError("You created this version, so you cannot also approve it - a different reviewer must approve it.");
+      } else {
+        setError(err instanceof ApiError ? err.message : "Action failed.");
+      }
     } finally {
       setPending(null);
     }
@@ -62,9 +60,6 @@ export function ApprovalActionPanel({ versionId, status }: { versionId: string; 
 
   return (
     <div className="flex flex-col gap-3">
-      <FormField id="actor" label="Your name" required className="max-w-xs">
-        <Input id="actor" value={actor} onChange={(e) => setActor(e.target.value)} />
-      </FormField>
       <FormField id="reason" label="Reason / comment" hint="Recorded on the approval history.">
         <Textarea id="reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
       </FormField>
@@ -78,7 +73,8 @@ export function ApprovalActionPanel({ versionId, status }: { versionId: string; 
       </div>
       <p className="text-xs text-text-muted">
         Approving only advances the workflow status - SafetyPolicy is still evaluated independently, every time a run
-        is actually submitted. Approval never bypasses runtime safety checks.
+        is actually submitted. Approval never bypasses runtime safety checks, and you can never approve a version you
+        created yourself.
       </p>
     </div>
   );

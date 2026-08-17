@@ -24,6 +24,57 @@ class CliError(Exception):
     """Raised for any CLI-detected failure; main() converts this to a non-zero exit code."""
 
 
+def create_admin(username: str, password: str | None) -> str | None:
+    """V2 Phase 6, Step 1: "provide safe initial local setup." The only
+    supported way to create the first ADMIN user - no route in the API can
+    do this without an existing ADMIN session, which is exactly the
+    chicken-and-egg problem this command exists to break. If `password` is
+    omitted, generates and returns a strong random one (printed exactly
+    once by main() - never logged, never stored anywhere in plaintext,
+    never recoverable afterwards; only its Argon2id hash is persisted).
+    Lazy-imports the sqlalchemy/auth stack so importing this module never
+    requires the "db"/"auth" extras for callers that only use the other
+    commands - same guarded-optional-dependency pattern as
+    zeroshield.api.dependencies."""
+    import os
+    import secrets
+
+    from zeroshield.audit.models import Action
+    from zeroshield.audit.repository import AuditRepository
+    from zeroshield.auth.models import Role
+    from zeroshield.auth.passwords import MIN_PASSWORD_LENGTH, hash_password
+    from zeroshield.auth.repository import AuthRepository, UsernameAlreadyExistsError
+    from zeroshield.db.session import build_sessionmaker
+
+    if not os.environ.get("DATABASE_URL"):
+        raise CliError(
+            "DATABASE_URL is not set - authentication requires PostgreSQL. Apply the Alembic "
+            "migrations first (see docs/HANDOVER.md), then set DATABASE_URL and retry."
+        )
+
+    generated_password = None
+    if password is None:
+        generated_password = secrets.token_urlsafe(18)
+        password = generated_password
+    elif len(password) < MIN_PASSWORD_LENGTH:
+        raise CliError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
+
+    session_factory = build_sessionmaker()
+    auth_repository = AuthRepository(session_factory)
+    audit_repository = AuditRepository(session_factory)
+    try:
+        user = auth_repository.create_user(username=username, password_hash=hash_password(password), role=Role.ADMIN)
+    except UsernameAlreadyExistsError as exc:
+        raise CliError(str(exc)) from exc
+
+    audit_repository.record(
+        actor_user_id=None, actor_username="cli:create-admin", actor_role=None, action=Action.USER_CREATED,
+        target_type="user", target_id=user.user_id, request_id=None,
+        metadata={"username": user.username, "role": user.role.value, "bootstrap": True},
+    )
+    return generated_password
+
+
 def _load_experiment(experiment_path: Path) -> ExperimentDefinition:
     if not experiment_path.is_file():
         raise CliError(f"experiment file not found: {experiment_path}")

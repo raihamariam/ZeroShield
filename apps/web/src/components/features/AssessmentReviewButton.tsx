@@ -12,12 +12,10 @@ export function AssessmentReviewButton({ assessmentId }: { assessmentId: string 
   const [error, setError] = useState<string | null>(null);
 
   async function review() {
-    const reviewedBy = typeof window !== "undefined" ? window.prompt("Your name, to record as the reviewer:") : null;
-    if (!reviewedBy?.trim()) return;
     setPending(true);
     setError(null);
     try {
-      await analystApi.reviewAssessment(assessmentId, { reviewed_by: reviewedBy.trim() });
+      await analystApi.reviewAssessment(assessmentId, {});
       router.refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Review failed.");

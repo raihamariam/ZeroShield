@@ -9,7 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from zeroshield.ai.provider import AIResponseError, AIUnavailableError
 from zeroshield.ai.research_analyst_service import ResearchAnalystService
-from zeroshield.api.dependencies import get_assurance_repository, get_research_analyst_service
+from zeroshield.api.dependencies import (
+    CurrentUser,
+    get_assurance_repository,
+    get_research_analyst_service,
+    require_role,
+)
 from zeroshield.api.schemas import (
     AIAssessmentResponse,
     ControlEffectivenessResponse,
@@ -29,6 +34,7 @@ from zeroshield.assurance.models import (
 )
 from zeroshield.assurance.regression import detect_regressions
 from zeroshield.assurance.repository import AssuranceRepository
+from zeroshield.auth.models import Role, User
 
 router = APIRouter(tags=["controls"])
 
@@ -61,13 +67,16 @@ def _validation_response(v: ControlValidation) -> ControlValidationResponse:
 
 
 @router.get("/controls", response_model=ControlListResponse, summary="List defensive controls with validation history")
-def list_controls(repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)]) -> ControlListResponse:
+def list_controls(
+    repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)], _current_user: CurrentUser
+) -> ControlListResponse:
     return ControlListResponse(controls=[_control_response(c) for c in repository.list_controls()])
 
 
 @router.get("/controls/{control_id}", response_model=ControlResponse, summary="Get one control")
 def get_control(
-    control_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)]
+    control_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    _current_user: CurrentUser,
 ) -> ControlResponse:
     control = repository.get_control(control_id)
     if control is None:
@@ -79,7 +88,8 @@ def get_control(
     "/controls/{control_id}/versions", response_model=ControlVersionListResponse, summary="List a control's versions"
 )
 def list_control_versions(
-    control_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)]
+    control_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    _current_user: CurrentUser,
 ) -> ControlVersionListResponse:
     return ControlVersionListResponse(versions=[_version_response(v) for v in repository.list_control_versions(control_id)])
 
@@ -93,7 +103,8 @@ def list_control_versions(
     "against the two most recent validations, if there are at least two.",
 )
 def get_control_effectiveness(
-    control_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)]
+    control_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    _current_user: CurrentUser,
 ) -> ControlEffectivenessResponse:
     control = repository.get_control(control_id)
     if control is None:
@@ -156,6 +167,7 @@ def explain_regression(
     control_id: str,
     repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
     analyst: Annotated[ResearchAnalystService, Depends(get_research_analyst_service)],
+    _current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.REVIEWER, Role.ADMIN))],
 ) -> AIAssessmentResponse:
     control = repository.get_control(control_id)
     if control is None:

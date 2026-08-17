@@ -13,7 +13,7 @@ provider's, not the client's request.
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, TypeVar
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -21,10 +21,14 @@ from zeroshield.ai.provider import AIResponseError, AIUnavailableError
 from zeroshield.ai.research_analyst_service import ResearchAnalystService
 from zeroshield.ai.schemas import AIAssessmentBase
 from zeroshield.api.dependencies import (
+    CurrentUser,
     get_assurance_repository,
+    get_audit_repository,
     get_experiments_dir,
+    get_request_id,
     get_research_analyst_service,
     get_vulnerability_repository,
+    require_role,
 )
 from zeroshield.api.schemas import (
     AIAssessmentListResponse,
@@ -36,6 +40,9 @@ from zeroshield.api.schemas import (
 )
 from zeroshield.assurance.models import AIAssessmentRecord
 from zeroshield.assurance.repository import AssuranceRepository
+from zeroshield.audit.models import Action
+from zeroshield.audit.repository import AuditRepository
+from zeroshield.auth.models import Role, User
 from zeroshield.domain_packs import UnknownDomainPackError, resolve_domain_pack
 from zeroshield.intelligence.correlation import rank_correlations
 from zeroshield.intelligence.repository import VulnerabilityRepository
@@ -43,7 +50,7 @@ from zeroshield.intelligence.sync_service import build_experiment_ids_by_cve
 from zeroshield.models.vulnerability import Vulnerability
 from zeroshield.templates import list_templates
 
-_T = TypeVar("_T", bound=AIAssessmentBase)
+_ANALYST_ROLES = (Role.RESEARCHER, Role.REVIEWER, Role.ADMIN)
 
 router = APIRouter(tags=["analyst"])
 
@@ -77,7 +84,7 @@ def _save(
     return _assessment_response(record)
 
 
-def _ai_call(fn: Callable[[], _T]) -> _T:
+def _ai_call[T: AIAssessmentBase](fn: Callable[[], T]) -> T:
     try:
         return fn()
     except AIUnavailableError as exc:
@@ -97,6 +104,7 @@ def classify_failure_pattern(
     vuln_repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     assurance_repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
     analyst: Annotated[ResearchAnalystService, Depends(get_research_analyst_service)],
+    _current_user: Annotated[User, Depends(require_role(*_ANALYST_ROLES))],
 ) -> AIAssessmentResponse:
     vulnerability = _get_vulnerability(cve_id, vuln_repository)
     candidates: list[str] = []
@@ -129,6 +137,7 @@ def analyze_mitigation_gap(
     vuln_repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     assurance_repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
     analyst: Annotated[ResearchAnalystService, Depends(get_research_analyst_service)],
+    _current_user: Annotated[User, Depends(require_role(*_ANALYST_ROLES))],
 ) -> AIAssessmentResponse:
     vulnerability = _get_vulnerability(cve_id, vuln_repository)
     # Ground the analysis in real, retrieved vendor advisory text (Step 3) rather
@@ -159,6 +168,7 @@ def get_correlations(
     cve_id: str,
     vuln_repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     experiments_dir: Annotated[Path, Depends(get_experiments_dir)],
+    _current_user: CurrentUser,
 ) -> CorrelationListResponse:
     subject = _get_vulnerability(cve_id, vuln_repository)
     candidates, _total = vuln_repository.list_vulnerabilities(domain=subject.domain_guess, limit=200)
@@ -194,6 +204,7 @@ def summarise_similarity(
     assurance_repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
     analyst: Annotated[ResearchAnalystService, Depends(get_research_analyst_service)],
     experiments_dir: Annotated[Path, Depends(get_experiments_dir)],
+    _current_user: Annotated[User, Depends(require_role(*_ANALYST_ROLES))],
 ) -> AIAssessmentResponse:
     subject = _get_vulnerability(cve_id, vuln_repository)
     candidates, _total = vuln_repository.list_vulnerabilities(domain=subject.domain_guess, limit=200)
@@ -230,6 +241,7 @@ def recommend_template(
     vuln_repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     assurance_repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
     analyst: Annotated[ResearchAnalystService, Depends(get_research_analyst_service)],
+    _current_user: Annotated[User, Depends(require_role(*_ANALYST_ROLES))],
 ) -> AIAssessmentResponse:
     vulnerability = _get_vulnerability(cve_id, vuln_repository)
     if vulnerability.domain_guess is None:
@@ -280,6 +292,7 @@ def draft_experiment_proposal(
     vuln_repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     assurance_repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
     analyst: Annotated[ResearchAnalystService, Depends(get_research_analyst_service)],
+    _current_user: Annotated[User, Depends(require_role(*_ANALYST_ROLES))],
 ) -> AIAssessmentResponse:
     vulnerability = _get_vulnerability(cve_id, vuln_repository)
     try:
@@ -321,6 +334,7 @@ def draft_experiment_proposal(
 @router.get("/ai-assessments", response_model=AIAssessmentListResponse, summary="List persisted AI assessments")
 def list_assessments(
     repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    _current_user: CurrentUser,
     subject_type: str | None = None,
     subject_id: str | None = None,
     assessment_type: str | None = None,
@@ -334,7 +348,8 @@ def list_assessments(
 
 @router.get("/ai-assessments/{assessment_id}", response_model=AIAssessmentResponse, summary="Get one AI assessment")
 def get_assessment(
-    assessment_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)]
+    assessment_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    _current_user: CurrentUser,
 ) -> AIAssessmentResponse:
     record = repository.get_assessment(assessment_id)
     if record is None:
@@ -355,10 +370,20 @@ def review_assessment(
     assessment_id: str,
     request: ReviewAssessmentRequest,
     repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(*_ANALYST_ROLES))],
 ) -> AIAssessmentResponse:
-    record = repository.mark_assessment_reviewed(assessment_id, reviewed_by=request.reviewed_by, review_note=request.note)
+    record = repository.mark_assessment_reviewed(
+        assessment_id, reviewed_by=current_user.username, review_note=request.note
+    )
     if record is None:
         raise HTTPException(
             status_code=404, detail={"error": "assessment_not_found", "detail": f"no assessment '{assessment_id}'"}
         )
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=Action.AI_ASSESSMENT_REVIEWED, target_type="ai_assessment", target_id=assessment_id,
+        request_id=request_id, metadata={"assessment_type": record.assessment_type},
+    )
     return _assessment_response(record)

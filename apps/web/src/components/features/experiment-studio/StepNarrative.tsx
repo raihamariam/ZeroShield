@@ -11,7 +11,6 @@ export function stepNarrativeErrors(state: {
   mitigationGap: string;
   researchQuestion: string;
   hypothesis: string;
-  createdBy: string;
 }): string[] {
   const errors: string[] = [];
   if (!state.failurePattern) errors.push("Failure pattern is required.");
@@ -20,7 +19,6 @@ export function stepNarrativeErrors(state: {
   if (!state.mitigationGap.trim()) errors.push("Mitigation gap is required.");
   if (!state.researchQuestion.trim()) errors.push("Research question is required.");
   if (!state.hypothesis.trim()) errors.push("Hypothesis is required.");
-  if (!state.createdBy.trim()) errors.push("Your name is required.");
   return errors;
 }
 
@@ -60,9 +58,6 @@ export function StepNarrative({ state, update }: StepProps) {
       </FormField>
       <FormField id="hypothesis" label="Hypothesis" required>
         <Textarea id="hypothesis" rows={2} value={state.hypothesis} onChange={(e) => update({ hypothesis: e.target.value })} />
-      </FormField>
-      <FormField id="created-by" label="Your name" required className="max-w-xs">
-        <Input id="created-by" value={state.createdBy} onChange={(e) => update({ createdBy: e.target.value })} />
       </FormField>
     </div>
   );

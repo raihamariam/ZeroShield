@@ -41,7 +41,6 @@ function initialState(initial: { domainPack?: string; template?: string; cve?: s
     mitigationGap: "",
     researchQuestion: "",
     hypothesis: "",
-    createdBy: typeof window !== "undefined" ? window.localStorage.getItem("zeroshield.createdBy") ?? "" : "",
   };
 }
 
@@ -88,10 +87,6 @@ export function ExperimentStudioWizard({ initialCveId, initialDomainPack, initia
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (state.createdBy) window.localStorage.setItem("zeroshield.createdBy", state.createdBy);
-  }, [state.createdBy]);
 
   const stepErrors: string[][] = [
     stepVulnerabilityErrors(state),

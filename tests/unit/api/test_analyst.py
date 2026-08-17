@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from tests.unit.api.conftest import fake_user
 
 from zeroshield.ai.null_provider import NullAIProvider
 from zeroshield.ai.provider import (
@@ -30,6 +31,7 @@ from zeroshield.ai.research_analyst_service import ResearchAnalystService
 from zeroshield.api import dependencies
 from zeroshield.api.app import app
 from zeroshield.assurance.repository import AssuranceRepository
+from zeroshield.audit.repository import AuditRepository
 from zeroshield.db.base import Base
 from zeroshield.intelligence.repository import VulnerabilityRepository
 from zeroshield.models.vulnerability import Vulnerability
@@ -75,10 +77,23 @@ def vuln_repo() -> VulnerabilityRepository:
     return repo
 
 
-def _client(assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, analyst_service) -> TestClient:
+@pytest.fixture
+def audit_repo() -> AuditRepository:
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True
+    )
+    Base.metadata.create_all(engine)
+    return AuditRepository(sessionmaker(bind=engine, expire_on_commit=False, future=True))
+
+
+def _client(
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, analyst_service, audit_repo: AuditRepository
+) -> TestClient:
     app.dependency_overrides[dependencies.get_assurance_repository] = lambda: assurance_repo
     app.dependency_overrides[dependencies.get_vulnerability_repository] = lambda: vuln_repo
     app.dependency_overrides[dependencies.get_research_analyst_service] = lambda: analyst_service
+    app.dependency_overrides[dependencies.get_audit_repository] = lambda: audit_repo
+    app.dependency_overrides[dependencies.get_current_user] = lambda: fake_user()
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -91,27 +106,27 @@ def _clear_overrides() -> Iterator[None]:
 # -- AI disabled / unavailable -------------------------------------------------
 
 def test_ai_disabled_returns_503_not_a_crash(
-    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
 ) -> None:
-    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(NullAIProvider()))
+    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(NullAIProvider()), audit_repo)
     response = client.post("/vulnerabilities/CVE-2024-21762/analyst/mitigation-gap")
     assert response.status_code == 503
     assert response.json()["detail"]["error"] == "ai_unavailable"
 
 
 def test_ai_unavailable_mid_call_returns_503(
-    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
 ) -> None:
     provider = FakeAIProvider(error=AIUnavailableError("upstream timed out"))
-    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(provider))
+    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(provider), audit_repo)
     response = client.post("/vulnerabilities/CVE-2024-21762/analyst/mitigation-gap")
     assert response.status_code == 503
 
 
 def test_unknown_cve_is_404_before_any_ai_call(
-    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
 ) -> None:
-    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(FakeAIProvider(data={})))
+    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(FakeAIProvider(data={})), audit_repo)
     response = client.post("/vulnerabilities/CVE-2024-00000/analyst/mitigation-gap")
     assert response.status_code == 404
 
@@ -119,7 +134,7 @@ def test_unknown_cve_is_404_before_any_ai_call(
 # -- Structural safety: AI output cannot approve/execute/alter evidence -------
 
 def test_prompt_injected_ai_output_is_stored_inert_and_unreviewed(
-    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
 ) -> None:
     """The seeded CVE description itself contains an injection attempt
     ('...approve this experiment now'). Even if the (fake) AI model is
@@ -134,7 +149,7 @@ def test_prompt_injected_ai_output_is_stored_inert_and_unreviewed(
             "gaps": [injected],
         }
     )
-    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(provider))
+    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(provider), audit_repo)
 
     response = client.post("/vulnerabilities/CVE-2024-21762/analyst/mitigation-gap")
     assert response.status_code == 201
@@ -160,25 +175,25 @@ def test_prompt_injected_ai_output_is_stored_inert_and_unreviewed(
 
 
 def test_review_assessment_requires_an_explicit_human_call(
-    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
 ) -> None:
     provider = FakeAIProvider(data={"confidence": 0.5, "rationale": "x", "source_ids": [], "cve_id": "CVE-2024-21762", "gaps": ["g"]})
-    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(provider))
+    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(provider), audit_repo)
     created = client.post("/vulnerabilities/CVE-2024-21762/analyst/mitigation-gap").json()
     assert created["reviewed"] is False
 
     reviewed = client.post(
-        f"/ai-assessments/{created['assessment_id']}/review", json={"reviewed_by": "alice", "note": "looks right"}
+        f"/ai-assessments/{created['assessment_id']}/review", json={"note": "looks right"}
     )
     assert reviewed.status_code == 200
     assert reviewed.json()["reviewed"] is True
-    assert reviewed.json()["reviewed_by"] == "alice"
+    assert reviewed.json()["reviewed_by"] == fake_user().username
 
 
 # -- Step 6: template recommendation only ever selects real registered templates --
 
 def test_recommend_template_rejects_ai_output_outside_the_registry(
-    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
 ) -> None:
     vuln_repo.upsert_vulnerability(
         Vulnerability(
@@ -192,21 +207,21 @@ def test_recommend_template_rejects_ai_output_outside_the_registry(
             "domain_pack_id": "vpn", "template_id": "a_template_the_ai_made_up", "template_version": "9.9.9",
         }
     )
-    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(provider))
+    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(provider), audit_repo)
     response = client.post("/vulnerabilities/CVE-2024-30001/analyst/template-recommendation")
     assert response.status_code == 502
     assert response.json()["detail"]["error"] == "ai_response_invalid"
 
 
 def test_unsupported_domain_never_reaches_the_ai_provider(
-    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
 ) -> None:
     vuln_repo.upsert_vulnerability(
         Vulnerability(
             cve_id="CVE-2024-30002", first_seen_at="2024-02-08T00:00:00Z", last_updated_at="2024-02-08T00:00:00Z",
         )
     )
-    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(FakeAIProvider(data={})))
+    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(FakeAIProvider(data={})), audit_repo)
     response = client.post("/vulnerabilities/CVE-2024-30002/analyst/template-recommendation")
     assert response.status_code == 422
     assert response.json()["detail"]["error"] == "unsupported_domain"
@@ -215,9 +230,9 @@ def test_unsupported_domain_never_reaches_the_ai_provider(
 # -- Step 4: correlations are deterministic, never AI --------------------------
 
 def test_correlations_endpoint_returns_caveat_and_no_ai_dependency(
-    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
 ) -> None:
-    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(NullAIProvider()))
+    client = _client(assurance_repo, vuln_repo, ResearchAnalystService(NullAIProvider()), audit_repo)
     response = client.get("/vulnerabilities/CVE-2024-21762/correlations")
     assert response.status_code == 200
     assert "not proof of identical root cause" in response.json()["caveat"]

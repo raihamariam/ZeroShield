@@ -18,11 +18,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from zeroshield.api.dependencies import (
+    CurrentUser,
+    get_audit_repository,
     get_experiment,
     get_experiments_dir,
     get_job_store,
     get_publisher,
+    get_request_id,
     get_run_repository,
+    require_role,
 )
 from zeroshield.api.schemas import (
     CVESummary,
@@ -33,6 +37,9 @@ from zeroshield.api.schemas import (
     JobSubmittedResponse,
     ValidationResponse,
 )
+from zeroshield.audit.models import Action
+from zeroshield.audit.repository import AuditRepository
+from zeroshield.auth.models import Role, User
 from zeroshield.models import ExperimentDefinition
 from zeroshield.models.enums import RunEventType
 from zeroshield.observability.metrics import EXPERIMENT_RUNS_SUBMITTED_TOTAL
@@ -54,6 +61,7 @@ router = APIRouter(tags=["experiments"])
 )
 def list_experiments(
     experiments_dir: Annotated[Path, Depends(get_experiments_dir)],
+    _current_user: CurrentUser,
 ) -> ExperimentListResponse:
     discovery = experiment_service.list_experiments(experiments_dir)
     return ExperimentListResponse(
@@ -78,6 +86,7 @@ def list_experiments(
 )
 def get_experiment_detail(
     experiment: Annotated[ExperimentDefinition, Depends(get_experiment)],
+    _current_user: CurrentUser,
 ) -> ExperimentDetailResponse:
     return ExperimentDetailResponse(
         experiment_id=experiment.experiment_id,
@@ -111,6 +120,7 @@ def get_experiment_detail(
 def validate_experiment(
     experiment: Annotated[ExperimentDefinition, Depends(get_experiment)],
     request: ExecutionContextRequest,
+    _current_user: CurrentUser,
 ) -> ValidationResponse:
     dataset_path = Path.cwd() / experiment.dataset_path
     dataset_available = dataset_path.is_file()
@@ -141,6 +151,9 @@ def submit_run(
     job_store: Annotated[JobStore, Depends(get_job_store)],
     publish: Annotated[Callable[[RunJobMessage], None], Depends(get_publisher)],
     run_repository: Annotated[RunRepository, Depends(get_run_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.REVIEWER, Role.ADMIN))],
 ) -> JobSubmittedResponse:
     job_id = f"JOB-{uuid.uuid4().hex}"
     now = datetime.now(UTC)
@@ -159,6 +172,8 @@ def submit_run(
             job_id=job_id,
             experiment_id=experiment.experiment_id,
             execution_context=request.execution_context,
+            submitted_by_user_id=current_user.user_id,
+            submitted_by_username=current_user.username,
         )
     )
     EXPERIMENT_RUNS_SUBMITTED_TOTAL.labels(
@@ -176,6 +191,11 @@ def submit_run(
         )
     except Exception:
         logger.warning("failed to record QUEUED run event for job %s", job_id, exc_info=True)
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=Action.RUN_SUBMITTED, target_type="job", target_id=job_id, request_id=request_id,
+        metadata={"experiment_id": experiment.experiment_id, "execution_context": request.execution_context.value},
+    )
     return JobSubmittedResponse(
         job_id=job_id, experiment_id=experiment.experiment_id, status=JobStatus.QUEUED.value
     )

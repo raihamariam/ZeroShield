@@ -12,9 +12,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from tests.unit.api.conftest import fake_user
 
 from zeroshield.api import dependencies
 from zeroshield.api.app import app
+from zeroshield.audit.repository import AuditRepository
 from zeroshield.db.base import Base
 from zeroshield.intelligence.connectors.base import RawIntelligenceRecord
 from zeroshield.intelligence.dedup import merge
@@ -39,11 +41,23 @@ def published_sync_messages() -> list[IntelligenceSyncJobMessage]:
 
 
 @pytest.fixture
+def audit_repo() -> AuditRepository:
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True
+    )
+    Base.metadata.create_all(engine)
+    return AuditRepository(sessionmaker(bind=engine, expire_on_commit=False, future=True))
+
+
+@pytest.fixture
 def client(
-    vuln_repo: VulnerabilityRepository, published_sync_messages: list[IntelligenceSyncJobMessage]
+    vuln_repo: VulnerabilityRepository, published_sync_messages: list[IntelligenceSyncJobMessage],
+    audit_repo: AuditRepository,
 ) -> Iterator[TestClient]:
     app.dependency_overrides[dependencies.get_vulnerability_repository] = lambda: vuln_repo
     app.dependency_overrides[dependencies.get_intelligence_publisher] = lambda: published_sync_messages.append
+    app.dependency_overrides[dependencies.get_audit_repository] = lambda: audit_repo
+    app.dependency_overrides[dependencies.get_current_user] = lambda: fake_user()
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     app.dependency_overrides.clear()

@@ -2,10 +2,21 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Sidebar } from "./Sidebar";
+import { UserMenu } from "./UserMenu";
+import type { UserResponse } from "@/lib/api/types";
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, currentUser }: { children: ReactNode; currentUser: UserResponse | null }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const pathname = usePathname();
+
+  // /login renders its own centred, chrome-free layout - showing the nav/
+  // sidebar there would both look wrong and imply the visitor is already
+  // signed in.
+  if (pathname === "/login") {
+    return <div className="min-h-full">{children}</div>;
+  }
 
   return (
     <div className="flex min-h-full flex-col">
@@ -32,6 +43,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Link href="/" className="text-sm font-semibold text-foreground">
           ZeroShield <span className="font-normal text-text-muted">Continuous Mitigation Assurance</span>
         </Link>
+        <div className="ml-auto">
+          <UserMenu currentUser={currentUser} />
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">

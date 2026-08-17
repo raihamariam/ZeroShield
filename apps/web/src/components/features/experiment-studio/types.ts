@@ -32,7 +32,8 @@ export interface WizardState {
   mitigationGap: string;
   researchQuestion: string;
   hypothesis: string;
-  createdBy: string;
+  // No createdBy field (V2 Phase 6) - the backend derives the creator from
+  // the authenticated session, never a client-supplied name.
 }
 
 export interface StepProps {

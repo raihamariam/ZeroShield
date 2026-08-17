@@ -75,4 +75,12 @@ def test_openapi_schema_lists_all_endpoints(client: TestClient) -> None:
         "/vulnerabilities/{cve_id}/analyst/similar",
         "/vulnerabilities/{cve_id}/analyst/template-recommendation",
         "/vulnerabilities/{cve_id}/correlations",
+        # V2 Phase 6: Hardening & Final Local V2 Release
+        "/auth/login",
+        "/auth/logout",
+        "/auth/me",
+        "/users",
+        "/users/{user_id}/role",
+        "/users/{user_id}/active",
+        "/audit-events",
     }

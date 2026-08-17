@@ -15,11 +15,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from tests.unit.api.conftest import fake_user
 
 from zeroshield.api import dependencies
 from zeroshield.api.app import app
 from zeroshield.assurance.models import ControlValidation
 from zeroshield.assurance.repository import AssuranceRepository, control_id_for
+from zeroshield.audit.repository import AuditRepository
 from zeroshield.db.base import Base
 from zeroshield.intelligence.repository import VulnerabilityRepository
 
@@ -48,10 +50,23 @@ def vuln_repo() -> VulnerabilityRepository:
 
 
 @pytest.fixture
-def client(assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository) -> Iterator[TestClient]:
+def audit_repo() -> AuditRepository:
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True
+    )
+    Base.metadata.create_all(engine)
+    return AuditRepository(sessionmaker(bind=engine, expire_on_commit=False, future=True))
+
+
+@pytest.fixture
+def client(
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
+) -> Iterator[TestClient]:
     app.dependency_overrides[dependencies.get_assurance_repository] = lambda: assurance_repo
     app.dependency_overrides[dependencies.get_vulnerability_repository] = lambda: vuln_repo
     app.dependency_overrides[dependencies.get_experiments_dir] = lambda: EXPERIMENTS_DIR
+    app.dependency_overrides[dependencies.get_audit_repository] = lambda: audit_repo
+    app.dependency_overrides[dependencies.get_current_user] = lambda: fake_user()
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -106,11 +121,11 @@ def test_approve_only_flips_status_never_queues_a_run(client: TestClient, assura
     scan_response = client.post("/revalidation/scan")
     candidate_id = scan_response.json()["candidates_created"][0]["candidate_id"]
 
-    response = client.post(f"/revalidation/{candidate_id}/approve", json={"actor": "alice", "note": "go ahead"})
+    response = client.post(f"/revalidation/{candidate_id}/approve", json={"note": "go ahead"})
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "approved"
-    assert body["reviewed_by"] == "alice"
+    assert body["reviewed_by"] == fake_user().username
     # Nothing beyond the status/review fields changed - no job_id, no run reference
     # was fabricated by this endpoint.
     assert set(body.keys()) == {
@@ -122,8 +137,8 @@ def test_approve_only_flips_status_never_queues_a_run(client: TestClient, assura
 def test_approving_an_already_resolved_candidate_is_409(client: TestClient, assurance_repo: AssuranceRepository) -> None:
     _seed_stale_control(assurance_repo)
     candidate_id = client.post("/revalidation/scan").json()["candidates_created"][0]["candidate_id"]
-    client.post(f"/revalidation/{candidate_id}/approve", json={"actor": "alice"})
-    second = client.post(f"/revalidation/{candidate_id}/approve", json={"actor": "bob"})
+    client.post(f"/revalidation/{candidate_id}/approve", json={})
+    second = client.post(f"/revalidation/{candidate_id}/approve", json={})
     assert second.status_code == 409
 
 
@@ -138,6 +153,6 @@ def test_manually_created_candidate_requires_a_known_control(client: TestClient)
 def test_dismiss_candidate(client: TestClient, assurance_repo: AssuranceRepository) -> None:
     _seed_stale_control(assurance_repo)
     candidate_id = client.post("/revalidation/scan").json()["candidates_created"][0]["candidate_id"]
-    response = client.post(f"/revalidation/{candidate_id}/dismiss", json={"actor": "alice", "note": "not needed"})
+    response = client.post(f"/revalidation/{candidate_id}/dismiss", json={"note": "not needed"})
     assert response.status_code == 200
     assert response.json()["status"] == "dismissed"

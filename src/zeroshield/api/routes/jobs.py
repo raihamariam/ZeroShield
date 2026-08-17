@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Path as FastAPIPath
 from fastapi.responses import StreamingResponse
 
-from zeroshield.api.dependencies import get_job_store, get_run_repository
+from zeroshield.api.dependencies import CurrentUser, get_job_store, get_run_repository
 from zeroshield.api.schemas import JobListResponse, JobResultSummary, JobStatusResponse
 from zeroshield.repositories import RunRepository
 from zeroshield.services.job_store import JobRecord, JobStatus, JobStore
@@ -71,6 +71,7 @@ def _job_response(record: JobRecord) -> JobStatusResponse:
 def get_job(
     job_id: Annotated[str, FastAPIPath(pattern=_JOB_ID_PATTERN)],
     job_store: Annotated[JobStore, Depends(get_job_store)],
+    _current_user: CurrentUser,
 ) -> JobStatusResponse:
     record = job_store.load(job_id)
     if record is None:
@@ -90,6 +91,7 @@ def get_job(
 )
 def list_jobs(
     job_store: Annotated[JobStore, Depends(get_job_store)],
+    _current_user: CurrentUser,
     status: str | None = None,
     limit: int = 50,
 ) -> JobListResponse:
@@ -112,6 +114,7 @@ async def stream_job_events(
     job_id: Annotated[str, FastAPIPath(pattern=_JOB_ID_PATTERN)],
     job_store: Annotated[JobStore, Depends(get_job_store)],
     run_repository: Annotated[RunRepository, Depends(get_run_repository)],
+    _current_user: CurrentUser,
 ) -> StreamingResponse:
     record = job_store.load(job_id)
     if record is None:

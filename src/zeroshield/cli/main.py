@@ -5,6 +5,7 @@ from pathlib import Path
 from zeroshield.cli.commands import (
     CliError,
     compare_experiment,
+    create_admin,
     run_experiment,
     validate_experiment,
     verify_evidence,
@@ -62,6 +63,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_parser.add_argument("run_dir", type=Path, help="e.g. results/ZC-VPN-EXP-001/RUN-1234567890")
 
+    create_admin_parser = subparsers.add_parser(
+        "create-admin",
+        help="bootstrap the first ADMIN user (V2 Phase 6) - requires DATABASE_URL, run once per fresh database",
+    )
+    create_admin_parser.add_argument("--username", required=True)
+    create_admin_parser.add_argument(
+        "--password", default=None, help="omit to generate and print a strong random password once"
+    )
+
     return parser
 
 
@@ -85,7 +95,16 @@ def main(argv: list[str] | None = None) -> int:
             ok = compare_experiment(args.experiment_dir)
         elif args.command == "verify-evidence":
             ok = verify_evidence(args.run_dir)
-        else:  # pragma: no cover - unreachable, argparse enforces the four choices above
+        elif args.command == "create-admin":
+            generated_password = create_admin(args.username, args.password)
+            print(f"Created ADMIN user '{args.username}'.")
+            if generated_password is not None:
+                print(
+                    "Generated password (shown once - it is not stored anywhere and cannot be "
+                    f"recovered): {generated_password}"
+                )
+            ok = True
+        else:  # pragma: no cover - unreachable, argparse enforces the choices above
             raise AssertionError(f"unreachable: unknown command {args.command!r}")
     except CliError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

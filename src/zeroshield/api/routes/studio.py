@@ -15,12 +15,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ValidationError
 
 from zeroshield.api.dependencies import (
+    CurrentUser,
+    get_audit_repository,
     get_experiment,
     get_experiment_version_repository,
     get_experiments_dir,
     get_job_store,
     get_publisher,
+    get_request_id,
     get_results_root,
+    require_role,
 )
 from zeroshield.api.schemas import (
     ApprovalActionRequest,
@@ -38,6 +42,9 @@ from zeroshield.api.schemas import (
     ValidationTemplateResponse,
     VerdictResponse,
 )
+from zeroshield.audit.models import Action
+from zeroshield.audit.repository import AuditRepository
+from zeroshield.auth.models import Role, User
 from zeroshield.domain_packs import UnknownDomainPackError, known_domain_packs, resolve_domain_pack
 from zeroshield.generators import (
     UnknownGeneratorError,
@@ -95,7 +102,7 @@ def _version_response(v: object) -> ExperimentVersionResponse:
 
 
 @router.get("/domain-packs", response_model=DomainPackListResponse, summary="List registered domain packs")
-def list_domain_packs() -> DomainPackListResponse:
+def list_domain_packs(_current_user: CurrentUser) -> DomainPackListResponse:
     return DomainPackListResponse(domain_packs=[_domain_pack_response(p) for p in known_domain_packs()])
 
 
@@ -104,7 +111,7 @@ def list_domain_packs() -> DomainPackListResponse:
     response_model=ValidationTemplateListResponse,
     summary="List a domain pack's validation templates",
 )
-def list_domain_pack_templates(pack_id: str) -> ValidationTemplateListResponse:
+def list_domain_pack_templates(pack_id: str, _current_user: CurrentUser) -> ValidationTemplateListResponse:
     try:
         resolve_domain_pack(pack_id)
     except UnknownDomainPackError:
@@ -121,7 +128,7 @@ def list_domain_pack_templates(pack_id: str) -> ValidationTemplateListResponse:
     description="Historical experiments keep their original template version - every "
     "version ever registered remains resolvable here, never overwritten.",
 )
-def get_template(template_id: str, version: str) -> ValidationTemplateResponse:
+def get_template(template_id: str, version: str, _current_user: CurrentUser) -> ValidationTemplateResponse:
     try:
         template = resolve_template(template_id, version)
     except UnknownTemplateError:
@@ -139,7 +146,9 @@ def get_template(template_id: str, version: str) -> ValidationTemplateResponse:
     description="Deterministic: the same domain_pack_id/seed/config always reproduces the same "
     "dataset. Preview only - does not persist a file or create an experiment version.",
 )
-def generate_dataset(request: GenerateDatasetRequest) -> GenerateDatasetResponse:
+def generate_dataset(
+    request: GenerateDatasetRequest, _current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.ADMIN))]
+) -> GenerateDatasetResponse:
     try:
         pack = resolve_domain_pack(request.domain_pack_id)
     except UnknownDomainPackError:
@@ -185,6 +194,9 @@ def generate_dataset(request: GenerateDatasetRequest) -> GenerateDatasetResponse
 def create_experiment_version(
     request: CreateExperimentVersionRequest,
     repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.ADMIN))],
 ) -> ExperimentVersionResponse:
     try:
         related_cves = [CVEReference.model_validate(c.model_dump()) for c in request.related_cves]
@@ -206,13 +218,18 @@ def create_experiment_version(
             mitigation_gap=request.mitigation_gap,
             research_question=request.research_question,
             hypothesis=request.hypothesis,
-            created_by=request.created_by,
+            created_by=current_user.username,
             metrics_to_collect=request.metrics_to_collect,  # type: ignore[arg-type]
         )
     except (ExperimentBuilderError, UnknownDomainPackError, UnknownTemplateError, ValidationError) as exc:
         raise HTTPException(status_code=422, detail={"error": "invalid_experiment_version", "detail": str(exc)}) from None
 
     repository.save_version(version)
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=Action.EXPERIMENT_VERSION_CREATED, target_type="experiment_version", target_id=version.version_id,
+        request_id=request_id, metadata={"experiment_id": version.experiment_id, "version_number": version.version_number},
+    )
     return _version_response(version)
 
 
@@ -232,6 +249,9 @@ def edit_experiment_version(
     version_id: str,
     request: EditExperimentVersionRequest,
     repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.ADMIN))],
 ) -> ExperimentVersionResponse:
     version = repository.get_version(version_id)
     if version is None:
@@ -244,6 +264,11 @@ def edit_experiment_version(
     except ImmutableVersionError as exc:
         raise HTTPException(status_code=409, detail={"error": "version_immutable", "detail": str(exc)}) from None
     repository.save_version(updated)
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=Action.EXPERIMENT_VERSION_EDITED, target_type="experiment_version", target_id=version_id,
+        request_id=request_id, metadata={"fields_changed": sorted(updates)},
+    )
     return _version_response(updated)
 
 
@@ -253,7 +278,9 @@ def edit_experiment_version(
     summary="Get one experiment version",
 )
 def get_experiment_version(
-    version_id: str, repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)]
+    version_id: str,
+    repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    _current_user: CurrentUser,
 ) -> ExperimentVersionResponse:
     version = repository.get_version(version_id)
     if version is None:
@@ -270,6 +297,7 @@ def get_experiment_version(
 )
 def list_experiment_versions(
     repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    _current_user: CurrentUser,
     experiment_id: str | None = None,
     status: ExperimentVersionStatus | None = None,
 ) -> ExperimentVersionListResponse:
@@ -283,7 +311,9 @@ def list_experiment_versions(
     summary="Get one experiment version's approval history",
 )
 def get_approval_history(
-    version_id: str, repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)]
+    version_id: str,
+    repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    _current_user: CurrentUser,
 ) -> list[ApprovalDecisionResponse]:
     return [
         ApprovalDecisionResponse(
@@ -294,20 +324,54 @@ def get_approval_history(
     ]
 
 
+_TRANSITION_AUDIT_ACTIONS = {
+    ExperimentVersionStatus.READY_FOR_REVIEW: Action.EXPERIMENT_VERSION_SUBMITTED_FOR_REVIEW,
+    ExperimentVersionStatus.UNDER_REVIEW: Action.EXPERIMENT_VERSION_REVIEW_STARTED,
+    ExperimentVersionStatus.APPROVED: Action.EXPERIMENT_VERSION_APPROVED,
+    ExperimentVersionStatus.REJECTED: Action.EXPERIMENT_VERSION_REJECTED,
+    ExperimentVersionStatus.RETIRED: Action.EXPERIMENT_VERSION_RETIRED,
+}
+
+
 def _do_transition(
     version_id: str,
     target: ExperimentVersionStatus,
     request: ApprovalActionRequest,
     repository: ExperimentVersionRepository,
     experiments_dir: Path | None,
+    *,
+    current_user: User,
+    audit_repository: AuditRepository,
+    request_id: str | None,
 ) -> ExperimentVersionResponse:
     version = repository.get_version(version_id)
     if version is None:
         raise HTTPException(
             status_code=404, detail={"error": "version_not_found", "detail": f"no version '{version_id}'"}
         )
+
+    # Step 2: "Where practical, a Researcher must not approve their own
+    # experiment." Enforced here, in the backend, on the authenticated
+    # actor - never trusting a client-supplied name (see
+    # ApprovalActionRequest's docstring). ADMIN may still override, since
+    # the brief frames this as a Researcher-specific constraint, not an
+    # absolute rule, and a small team needs some escape hatch.
+    if target is ExperimentVersionStatus.APPROVED and current_user.username == version.created_by and current_user.role is not Role.ADMIN:
+        audit_repository.record(
+            actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+            action=Action.EXPERIMENT_VERSION_SELF_APPROVAL_BLOCKED, target_type="experiment_version",
+            target_id=version_id, request_id=request_id, metadata={"created_by": version.created_by},
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "self_approval_forbidden",
+                "detail": "you created this experiment version and cannot also approve it - a different REVIEWER (or an ADMIN) must approve it",
+            },
+        )
+
     try:
-        new_version, decision = transition(version, target, actor=request.actor, reason=request.reason)
+        new_version, decision = transition(version, target, actor=current_user.username, reason=request.reason)
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail={"error": "invalid_transition", "detail": str(exc)}) from None
 
@@ -315,6 +379,13 @@ def _do_transition(
     repository.append_approval_decision(decision)
     if target is ExperimentVersionStatus.APPROVED and experiments_dir is not None:
         materialise_to_experiments_dir(new_version, experiments_dir)
+
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=_TRANSITION_AUDIT_ACTIONS[target], target_type="experiment_version", target_id=version_id,
+        request_id=request_id, metadata={"reason": request.reason} if request.reason else {},
+        previous_state={"status": version.status.value}, new_state={"status": target.value},
+    )
     return _version_response(new_version)
 
 
@@ -327,8 +398,14 @@ def submit_review(
     version_id: str,
     request: ApprovalActionRequest,
     repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.ADMIN))],
 ) -> ExperimentVersionResponse:
-    return _do_transition(version_id, ExperimentVersionStatus.READY_FOR_REVIEW, request, repository, None)
+    return _do_transition(
+        version_id, ExperimentVersionStatus.READY_FOR_REVIEW, request, repository, None,
+        current_user=current_user, audit_repository=audit_repository, request_id=request_id,
+    )
 
 
 @router.post(
@@ -340,8 +417,14 @@ def start_review(
     version_id: str,
     request: ApprovalActionRequest,
     repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.REVIEWER, Role.ADMIN))],
 ) -> ExperimentVersionResponse:
-    return _do_transition(version_id, ExperimentVersionStatus.UNDER_REVIEW, request, repository, None)
+    return _do_transition(
+        version_id, ExperimentVersionStatus.UNDER_REVIEW, request, repository, None,
+        current_user=current_user, audit_repository=audit_repository, request_id=request_id,
+    )
 
 
 @router.post(
@@ -351,15 +434,22 @@ def start_review(
     description="Does NOT bypass SafetyPolicy - only sets the workflow state and the trusted "
     "core's own approval_status in lockstep, then materialises the ExperimentDefinition into "
     "experiments/ for the existing, unchanged run infrastructure to discover. SafetyPolicy is "
-    "still evaluated, independently, every time a run is actually submitted.",
+    "still evaluated, independently, every time a run is actually submitted. A Researcher "
+    "cannot approve a version they themselves created (Step 2) - see docs/V2_SECURITY.md.",
 )
 def approve_version(
     version_id: str,
     request: ApprovalActionRequest,
     repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
     experiments_dir: Annotated[Path, Depends(get_experiments_dir)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.REVIEWER, Role.ADMIN))],
 ) -> ExperimentVersionResponse:
-    return _do_transition(version_id, ExperimentVersionStatus.APPROVED, request, repository, experiments_dir)
+    return _do_transition(
+        version_id, ExperimentVersionStatus.APPROVED, request, repository, experiments_dir,
+        current_user=current_user, audit_repository=audit_repository, request_id=request_id,
+    )
 
 
 @router.post(
@@ -371,8 +461,14 @@ def reject_version(
     version_id: str,
     request: ApprovalActionRequest,
     repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.REVIEWER, Role.ADMIN))],
 ) -> ExperimentVersionResponse:
-    return _do_transition(version_id, ExperimentVersionStatus.REJECTED, request, repository, None)
+    return _do_transition(
+        version_id, ExperimentVersionStatus.REJECTED, request, repository, None,
+        current_user=current_user, audit_repository=audit_repository, request_id=request_id,
+    )
 
 
 @router.post(
@@ -384,8 +480,14 @@ def retire_version(
     version_id: str,
     request: ApprovalActionRequest,
     repository: Annotated[ExperimentVersionRepository, Depends(get_experiment_version_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.REVIEWER, Role.ADMIN))],
 ) -> ExperimentVersionResponse:
-    return _do_transition(version_id, ExperimentVersionStatus.RETIRED, request, repository, None)
+    return _do_transition(
+        version_id, ExperimentVersionStatus.RETIRED, request, repository, None,
+        current_user=current_user, audit_repository=audit_repository, request_id=request_id,
+    )
 
 
 @router.post(
@@ -403,6 +505,9 @@ def submit_experiment_version_run(
     experiments_dir: Annotated[Path, Depends(get_experiments_dir)],
     job_store: Annotated[JobStore, Depends(get_job_store)],
     publish: Annotated[Callable[[RunJobMessage], None], Depends(get_publisher)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.REVIEWER, Role.ADMIN))],
 ) -> JobSubmittedResponse:
     version = repository.get_version(version_id)
     if version is None:
@@ -431,8 +536,14 @@ def submit_experiment_version_run(
     )
     publish(
         RunJobMessage(
-            job_id=job_id, experiment_id=version.experiment_id, execution_context=ExecutionContext.EXPERIMENT_RUN
+            job_id=job_id, experiment_id=version.experiment_id, execution_context=ExecutionContext.EXPERIMENT_RUN,
+            submitted_by_user_id=current_user.user_id, submitted_by_username=current_user.username,
         )
+    )
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=Action.RUN_SUBMITTED, target_type="job", target_id=job_id, request_id=request_id,
+        metadata={"experiment_id": version.experiment_id, "version_id": version_id},
     )
     return JobSubmittedResponse(job_id=job_id, experiment_id=version.experiment_id, status=JobStatus.QUEUED.value)
 
@@ -447,6 +558,7 @@ def submit_experiment_version_run(
 def get_experiment_verdict(
     experiment: Annotated[ExperimentDefinition, Depends(get_experiment)],
     results_root: Annotated[Path, Depends(get_results_root)],
+    _current_user: CurrentUser,
 ) -> VerdictResponse:
     evidence = experiment_service.load_latest_evidence(experiment.experiment_id, results_root)
     if evidence is None:

@@ -3,10 +3,12 @@ threat-intelligence system of record (Phase 2: `vulnerabilities`,
 `vulnerability_sources`, `vulnerability_history`, `products`,
 `affected_products`, `vendor_advisories`, `intelligence_syncs`,
 `validation_candidates`), Experiment Studio's versioned drafts/approvals
-(Phase 3: `experiment_versions`, `experiment_version_approvals`), and AI &
+(Phase 3: `experiment_versions`, `experiment_version_approvals`), AI &
 Continuous Assurance (Phase 5: `assets`, `controls`, `control_versions`,
 `control_validations`, `revalidation_candidates`, `ai_assessments` - see
-zeroshield.assurance.models for what each one means).
+zeroshield.assurance.models for what each one means), and Hardening & Local
+V2 Release (Phase 6: `users`, `sessions`, `audit_events` - see
+zeroshield.auth.models/zeroshield.audit.models).
 
 `runs` holds one row per job (keyed by the API-generated job_id, see
 zeroshield.services.job_store), tracking its most recent status. `run_events`
@@ -353,3 +355,62 @@ class AIAssessmentORM(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(_UTCDateTime, nullable=True)
     review_note: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime, nullable=False, index=True)
+
+
+class UserORM(Base):
+    """See zeroshield.auth.models.User/UserWithCredentials. `password_hash`
+    never leaves this module boundary - zeroshield.auth.repository is the
+    only code that reads this column."""
+
+    __tablename__ = "users"
+
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    username: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True, index=True)
+    failed_login_attempts: Mapped[int] = mapped_column(nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(_UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(_UTCDateTime, nullable=False)
+
+
+class SessionORM(Base):
+    """`session_id` is the SHA-256 hex digest of the raw cookie token, never
+    the raw token - see zeroshield.auth.models.SessionRecord's docstring."""
+
+    __tablename__ = "sessions"
+
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(_UTCDateTime, nullable=False, index=True)
+    last_used_at: Mapped[datetime] = mapped_column(_UTCDateTime, nullable=False)
+    ip_address: Mapped[str | None] = mapped_column(String, nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class AuditEventORM(Base):
+    """Append-only (Phase 6, Step 3) - no code path in this application ever
+    updates or deletes a row here; see zeroshield.audit.service for the sole
+    writer. `actor_username`/`actor_role` are snapshotted at write time
+    (denormalised, not a live join to `users`) so an event remains a
+    faithful historical record even if a user is later renamed or their role
+    changes. `metadata_json`/`previous_state`/`new_state` must never contain
+    a secret (password, session token, API key) - callers are responsible
+    for redaction before calling zeroshield.audit.service.record()."""
+
+    __tablename__ = "audit_events"
+
+    audit_id: Mapped[str] = mapped_column(String, primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(_UTCDateTime, nullable=False, index=True)
+    actor_user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    actor_username: Mapped[str | None] = mapped_column(String, nullable=True)
+    actor_role: Mapped[str | None] = mapped_column(String, nullable=True)
+    action: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    target_type: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    target_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    request_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    previous_state: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    new_state: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

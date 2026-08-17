@@ -37,7 +37,6 @@ function buildRequest(state: StepProps["state"]): CreateExperimentVersionRequest
     mitigation_gap: state.mitigationGap.trim(),
     research_question: state.researchQuestion.trim(),
     hypothesis: state.hypothesis.trim(),
-    created_by: state.createdBy.trim(),
     metrics_to_collect: state.metricsSelected,
   };
 }
@@ -70,7 +69,7 @@ export function StepReview({ state }: StepProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await studioApi.submitVersionForReview(created.version_id, { actor: state.createdBy.trim() });
+      await studioApi.submitVersionForReview(created.version_id, {});
       setSubmittedForReview(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to submit for review.");
@@ -115,7 +114,6 @@ export function StepReview({ state }: StepProps) {
         <ReviewField label="Seed" value={String(request.seed)} />
         <ReviewField label="Failure pattern" value={request.failure_pattern} />
         <ReviewField label="Metrics" value={request.metrics_to_collect?.join(", ") ?? "—"} />
-        <ReviewField label="Created by" value={request.created_by} />
       </div>
 
       <div>

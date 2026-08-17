@@ -10,3 +10,4 @@ export * as analystApi from "./analyst";
 export * as assetsApi from "./assets";
 export * as controlsApi from "./controls";
 export * as revalidationApi from "./revalidation";
+export * as authApi from "./auth";

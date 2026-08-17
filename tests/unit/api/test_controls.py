@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from tests.unit.api.conftest import fake_user
 
 from zeroshield.ai.null_provider import NullAIProvider
 from zeroshield.ai.provider import AIGenerationRequest, AIGenerationResult, AIProvider
@@ -54,6 +55,7 @@ def client(assurance_repo: AssuranceRepository) -> Iterator[TestClient]:
     app.dependency_overrides[dependencies.get_research_analyst_service] = lambda: ResearchAnalystService(
         NullAIProvider()
     )
+    app.dependency_overrides[dependencies.get_current_user] = lambda: fake_user()
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -187,6 +189,7 @@ def test_explain_regression_calls_ai_only_after_a_real_regression_is_detected(
     )
     app.dependency_overrides[dependencies.get_assurance_repository] = lambda: assurance_repo
     app.dependency_overrides[dependencies.get_research_analyst_service] = lambda: ResearchAnalystService(provider)
+    app.dependency_overrides[dependencies.get_current_user] = lambda: fake_user()
     try:
         with TestClient(app, raise_server_exceptions=False) as test_client:
             response = test_client.post(f"/controls/{control.control_id}/regression/explain")

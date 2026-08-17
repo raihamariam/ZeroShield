@@ -16,13 +16,21 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from zeroshield.api.dependencies import get_experiment, get_results_root
+from zeroshield.api.dependencies import (
+    CurrentUser,
+    get_audit_repository,
+    get_experiment,
+    get_request_id,
+    get_results_root,
+)
 from zeroshield.api.schemas import (
     EvidenceResponse,
     MetricsSummary,
     ResultsResponse,
     RunEvidenceSummary,
 )
+from zeroshield.audit.models import Action
+from zeroshield.audit.repository import AuditRepository
 from zeroshield.models import EvidenceManifest, ExperimentDefinition
 from zeroshield.repositories import verify_manifest_integrity
 from zeroshield.services import experiment_service
@@ -54,6 +62,7 @@ def _load_view(experiment: ExperimentDefinition, results_root: Path) -> Evidence
 def get_results(
     experiment: Annotated[ExperimentDefinition, Depends(get_experiment)],
     results_root: Annotated[Path, Depends(get_results_root)],
+    _current_user: CurrentUser,
 ) -> ResultsResponse:
     view = _load_view(experiment, results_root)
     comparison = view.comparison
@@ -96,6 +105,7 @@ def _manifest_summary(manifest: EvidenceManifest) -> RunEvidenceSummary:
 def get_evidence(
     experiment: Annotated[ExperimentDefinition, Depends(get_experiment)],
     results_root: Annotated[Path, Depends(get_results_root)],
+    _current_user: CurrentUser,
 ) -> EvidenceResponse:
     view = _load_view(experiment, results_root)
     return EvidenceResponse(
@@ -119,9 +129,18 @@ def get_evidence(
 def download_evidence_bundle(
     experiment: Annotated[ExperimentDefinition, Depends(get_experiment)],
     results_root: Annotated[Path, Depends(get_results_root)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: CurrentUser,
 ) -> StreamingResponse:
     view = _load_view(experiment, results_root)
     experiment_dir = results_root / experiment.experiment_id
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=Action.EVIDENCE_VERIFIED, target_type="experiment", target_id=experiment.experiment_id,
+        request_id=request_id,
+        metadata={"baseline_run_id": view.baseline_manifest.run_id, "mitigation_run_id": view.mitigation_manifest.run_id},
+    )
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:

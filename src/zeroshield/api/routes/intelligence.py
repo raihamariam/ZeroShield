@@ -16,7 +16,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Path as FastAPIPath
 
-from zeroshield.api.dependencies import get_intelligence_publisher, get_vulnerability_repository
+from zeroshield.api.dependencies import (
+    CurrentUser,
+    get_audit_repository,
+    get_intelligence_publisher,
+    get_request_id,
+    get_vulnerability_repository,
+    require_role,
+)
 from zeroshield.api.schemas import (
     ConnectorHealthResponse,
     PriorityQueueResponse,
@@ -35,6 +42,9 @@ from zeroshield.api.schemas import (
     VulnerabilitySourceDetail,
     VulnerabilitySummary,
 )
+from zeroshield.audit.models import Action
+from zeroshield.audit.repository import AuditRepository
+from zeroshield.auth.models import Role, User
 from zeroshield.intelligence.connectors.registry import build_connector, known_sources
 from zeroshield.intelligence.messaging import IntelligenceSyncJobMessage
 from zeroshield.intelligence.repository import VulnerabilityRepository
@@ -94,6 +104,7 @@ def _sync_response(sync: IntelligenceSync) -> SyncStatusResponse:
 )
 def list_vulnerabilities(
     repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
+    _current_user: CurrentUser,
     domain: Annotated[Domain | None, Query()] = None,
     kev: Annotated[bool | None, Query()] = None,
     cvss_gte: Annotated[float | None, Query(ge=0.0, le=10.0)] = None,
@@ -120,6 +131,7 @@ def list_vulnerabilities(
 def get_vulnerability_detail(
     repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     cve_id: Annotated[str, FastAPIPath(pattern=_CVE_ID_PATTERN)],
+    _current_user: CurrentUser,
 ) -> VulnerabilityDetailResponse:
     vulnerability = repository.get_vulnerability(cve_id)
     if vulnerability is None:
@@ -167,6 +179,7 @@ def get_vulnerability_detail(
 def get_vulnerability_history(
     repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     cve_id: Annotated[str, FastAPIPath(pattern=_CVE_ID_PATTERN)],
+    _current_user: CurrentUser,
 ) -> VulnerabilityHistoryResponse:
     history = repository.get_history(cve_id)
     return VulnerabilityHistoryResponse(
@@ -192,6 +205,7 @@ def get_vulnerability_history(
 def get_vulnerability_advisories(
     repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     cve_id: Annotated[str, FastAPIPath(pattern=_CVE_ID_PATTERN)],
+    _current_user: CurrentUser,
 ) -> VendorAdvisoryListResponse:
     advisories = repository.get_advisories_for_cve(cve_id)
     return VendorAdvisoryListResponse(
@@ -218,6 +232,7 @@ def get_vulnerability_advisories(
 )
 def get_priority_queue(
     repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
+    _current_user: CurrentUser,
     domain: Annotated[Domain | None, Query()] = None,
     support_status: Annotated[SupportStatus | None, Query()] = None,
     priority_gte: Annotated[float | None, Query(ge=0.0, le=100.0)] = None,
@@ -259,7 +274,7 @@ def _connector_health() -> list[ConnectorHealthResponse]:
     response_model=SourcesResponse,
     summary="List registered intelligence sources and their reachability",
 )
-def list_sources() -> SourcesResponse:
+def list_sources(_current_user: CurrentUser) -> SourcesResponse:
     return SourcesResponse(sources=_connector_health())
 
 
@@ -271,7 +286,7 @@ def list_sources() -> SourcesResponse:
     "separate route since 'integrations' is the operations-facing name used elsewhere "
     "in the V2 roadmap, while 'sources' is the data-facing name used on Vulnerability records.",
 )
-def list_integrations() -> SourcesResponse:
+def list_integrations(_current_user: CurrentUser) -> SourcesResponse:
     return SourcesResponse(sources=_connector_health())
 
 
@@ -288,6 +303,9 @@ def submit_sync(
     request: SyncRequest,
     repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     publish: Annotated[Callable[[IntelligenceSyncJobMessage], None], Depends(get_intelligence_publisher)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.ADMIN))],
 ) -> SyncSubmittedResponse:
     try:
         source = VulnerabilitySourceName(request.source)
@@ -327,6 +345,11 @@ def submit_sync(
         )
     )
     publish(IntelligenceSyncJobMessage(sync_id=sync_id, source=source, since=since))
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=Action.SYNC_INITIATED, target_type="intelligence_sync", target_id=sync_id, request_id=request_id,
+        metadata={"source": source.value},
+    )
     return SyncSubmittedResponse(sync_id=sync_id, source=source.value, status=IntelligenceSyncStatus.QUEUED.value)
 
 
@@ -337,6 +360,7 @@ def submit_sync(
 )
 def list_syncs(
     repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
+    _current_user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> SyncListResponse:
@@ -351,6 +375,7 @@ def list_syncs(
 def get_sync_status(
     repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     sync_id: Annotated[str, FastAPIPath(pattern=r"^SYNC-[0-9a-f]{32}$")],
+    _current_user: CurrentUser,
 ) -> SyncStatusResponse:
     sync = repository.get_sync(sync_id)
     if sync is None:

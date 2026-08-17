@@ -84,10 +84,8 @@ export function AnalystActionsPanel({
   }
 
   async function review(assessmentId: string) {
-    const reviewedBy = typeof window !== "undefined" ? window.prompt("Your name, to record as the reviewer:") : null;
-    if (!reviewedBy?.trim()) return;
     try {
-      upsert(await analystApi.reviewAssessment(assessmentId, { reviewed_by: reviewedBy.trim() }));
+      upsert(await analystApi.reviewAssessment(assessmentId, {}));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Review failed.");
     }

@@ -17,9 +17,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from zeroshield.api.dependencies import (
+    CurrentUser,
     get_assurance_repository,
+    get_audit_repository,
     get_experiments_dir,
+    get_request_id,
     get_vulnerability_repository,
+    require_role,
 )
 from zeroshield.api.schemas import (
     CreateRevalidationCandidateRequest,
@@ -30,6 +34,9 @@ from zeroshield.api.schemas import (
 )
 from zeroshield.assurance.models import RevalidationCandidate
 from zeroshield.assurance.repository import AssuranceRepository
+from zeroshield.audit.models import Action
+from zeroshield.audit.repository import AuditRepository
+from zeroshield.auth.models import Role, User
 from zeroshield.intelligence.repository import VulnerabilityRepository
 
 router = APIRouter(tags=["revalidation"])
@@ -57,6 +64,7 @@ def scan_for_revalidation(
     assurance_repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
     vuln_repository: Annotated[VulnerabilityRepository, Depends(get_vulnerability_repository)],
     experiments_dir: Annotated[Path, Depends(get_experiments_dir)],
+    _current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.REVIEWER, Role.ADMIN))],
 ) -> RevalidationScanResponse:
     from zeroshield.assurance.revalidation import scan
 
@@ -69,7 +77,8 @@ def scan_for_revalidation(
 
 @router.get("/revalidation", response_model=RevalidationCandidateListResponse, summary="List revalidation candidates")
 def list_revalidation_candidates(
-    repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)], status: str | None = None
+    repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)], _current_user: CurrentUser,
+    status: str | None = None,
 ) -> RevalidationCandidateListResponse:
     return RevalidationCandidateListResponse(candidates=[_response(c) for c in repository.list_candidates(status=status)])
 
@@ -86,6 +95,7 @@ def list_revalidation_candidates(
 def create_revalidation_candidate(
     request: CreateRevalidationCandidateRequest,
     repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    _current_user: Annotated[User, Depends(require_role(Role.RESEARCHER, Role.REVIEWER, Role.ADMIN))],
 ) -> RevalidationCandidateResponse:
     if repository.get_control(request.control_id) is None:
         raise HTTPException(
@@ -103,7 +113,8 @@ def create_revalidation_candidate(
 
 @router.get("/revalidation/{candidate_id}", response_model=RevalidationCandidateResponse, summary="Get one revalidation candidate")
 def get_revalidation_candidate(
-    candidate_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)]
+    candidate_id: str, repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    _current_user: CurrentUser,
 ) -> RevalidationCandidateResponse:
     candidate = repository.get_candidate(candidate_id)
     if candidate is None:
@@ -113,8 +124,21 @@ def get_revalidation_candidate(
     return _response(candidate)
 
 
+_DECISION_AUDIT_ACTIONS = {
+    "approved": Action.REVALIDATION_CANDIDATE_APPROVED,
+    "dismissed": Action.REVALIDATION_CANDIDATE_DISMISSED,
+}
+
+
 def _transition(
-    candidate_id: str, status: str, request: RevalidationDecisionRequest, repository: AssuranceRepository
+    candidate_id: str,
+    status: str,
+    request: RevalidationDecisionRequest,
+    repository: AssuranceRepository,
+    *,
+    current_user: User,
+    audit_repository: AuditRepository,
+    request_id: str | None,
 ) -> RevalidationCandidateResponse:
     existing = repository.get_candidate(candidate_id)
     if existing is None:
@@ -130,9 +154,14 @@ def _transition(
             },
         )
     updated = repository.update_candidate_status(
-        candidate_id, status=status, reviewed_by=request.actor, review_note=request.note
+        candidate_id, status=status, reviewed_by=current_user.username, review_note=request.note
     )
     assert updated is not None
+    audit_repository.record(
+        actor_user_id=current_user.user_id, actor_username=current_user.username, actor_role=current_user.role.value,
+        action=_DECISION_AUDIT_ACTIONS[status], target_type="revalidation_candidate", target_id=candidate_id,
+        request_id=request_id, metadata={"control_id": existing.control_id, "trigger_type": existing.trigger_type},
+    )
     return _response(updated)
 
 
@@ -148,8 +177,14 @@ def approve_revalidation_candidate(
     candidate_id: str,
     request: RevalidationDecisionRequest,
     repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.REVIEWER, Role.ADMIN))],
 ) -> RevalidationCandidateResponse:
-    return _transition(candidate_id, "approved", request, repository)
+    return _transition(
+        candidate_id, "approved", request, repository,
+        current_user=current_user, audit_repository=audit_repository, request_id=request_id,
+    )
 
 
 @router.post(
@@ -159,5 +194,11 @@ def dismiss_revalidation_candidate(
     candidate_id: str,
     request: RevalidationDecisionRequest,
     repository: Annotated[AssuranceRepository, Depends(get_assurance_repository)],
+    audit_repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+    request_id: Annotated[str | None, Depends(get_request_id)],
+    current_user: Annotated[User, Depends(require_role(Role.REVIEWER, Role.ADMIN))],
 ) -> RevalidationCandidateResponse:
-    return _transition(candidate_id, "dismissed", request, repository)
+    return _transition(
+        candidate_id, "dismissed", request, repository,
+        current_user=current_user, audit_repository=audit_repository, request_id=request_id,
+    )

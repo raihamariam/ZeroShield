@@ -13,10 +13,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from tests.unit.api.conftest import fake_user
 
 from zeroshield.api import dependencies
 from zeroshield.api.app import app
 from zeroshield.assurance.repository import AssuranceRepository
+from zeroshield.audit.repository import AuditRepository
 from zeroshield.db.base import Base
 from zeroshield.intelligence.repository import VulnerabilityRepository
 
@@ -47,9 +49,18 @@ def vuln_repo(_session_factory) -> VulnerabilityRepository:
 
 
 @pytest.fixture
-def client(assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository) -> Iterator[TestClient]:
+def audit_repo(_session_factory) -> AuditRepository:
+    return AuditRepository(_session_factory)
+
+
+@pytest.fixture
+def client(
+    assurance_repo: AssuranceRepository, vuln_repo: VulnerabilityRepository, audit_repo: AuditRepository
+) -> Iterator[TestClient]:
     app.dependency_overrides[dependencies.get_assurance_repository] = lambda: assurance_repo
     app.dependency_overrides[dependencies.get_vulnerability_repository] = lambda: vuln_repo
+    app.dependency_overrides[dependencies.get_audit_repository] = lambda: audit_repo
+    app.dependency_overrides[dependencies.get_current_user] = lambda: fake_user()
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     app.dependency_overrides.clear()

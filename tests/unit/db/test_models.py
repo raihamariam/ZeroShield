@@ -31,6 +31,10 @@ def test_base_metadata_registers_all_expected_tables() -> None:
         "control_validations",
         "revalidation_candidates",
         "ai_assessments",
+        # V2 Phase 6: Hardening & Local V2 Release
+        "users",
+        "sessions",
+        "audit_events",
     }
 
 

@@ -15,9 +15,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import Depends, HTTPException
+from fastapi import Cookie, Depends, HTTPException, Request
 
 from zeroshield.api.messaging import publish_run_job
+from zeroshield.auth.models import Role, User
 from zeroshield.experiments import find_experiment
 from zeroshield.models import ExperimentDefinition
 from zeroshield.repositories import NullRunRepository, RunRepository
@@ -26,14 +27,22 @@ from zeroshield.services.job_store import JobStore, RunJobMessage
 if TYPE_CHECKING:
     # Type-only: keeps sqlalchemy/httpx/pika/anthropic out of this module's
     # *runtime* import graph for callers that never touch the
-    # intelligence/studio/assurance/ai dependencies below - the actual
-    # imports happen lazily inside each function body.
+    # intelligence/studio/assurance/ai/auth/audit dependencies below - the
+    # actual imports happen lazily inside each function body. zeroshield.auth.
+    # models (Role/User, imported for real above) is pure-Pydantic and has no
+    # such cost, so it is not deferred - FastAPI's own get_type_hints() needs
+    # it resolvable at import time wherever CurrentUser/require_role are used.
     from zeroshield.ai.provider import AIProvider
     from zeroshield.ai.research_analyst_service import ResearchAnalystService
     from zeroshield.assurance.repository import AssuranceRepository
+    from zeroshield.audit.repository import AuditRepository
+    from zeroshield.auth.repository import AuthRepository
+    from zeroshield.auth.service import AuthService
     from zeroshield.intelligence.messaging import IntelligenceSyncJobMessage
     from zeroshield.intelligence.repository import VulnerabilityRepository
     from zeroshield.studio.repository import ExperimentVersionRepository
+
+SESSION_COOKIE_NAME = "zeroshield_session"
 
 
 def get_experiments_dir() -> Path:
@@ -182,3 +191,97 @@ def get_experiment(
             },
         )
     return experiment
+
+
+# -- Auth / RBAC / audit (V2 Phase 6) ------------------------------------------
+
+
+def get_request_id(request: Request) -> str | None:
+    """Reads the correlation ID zeroshield.api.observability.
+    RequestContextMiddleware attached to this request - None only if that
+    middleware somehow never ran (never true in the real app; only possible
+    in a test that builds a route in isolation)."""
+    return getattr(request.state, "request_id", None)
+
+
+def get_auth_repository() -> "AuthRepository":
+    """No no-op fallback, same reasoning as get_vulnerability_repository:
+    user/session data (V2 Phase 6) is PostgreSQL-backed, never optional."""
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "auth_unavailable", "detail": "DATABASE_URL is not configured - authentication requires PostgreSQL."},
+        )
+
+    from zeroshield.auth.repository import AuthRepository
+    from zeroshield.db.session import build_sessionmaker
+
+    return AuthRepository(build_sessionmaker())
+
+
+def get_audit_repository() -> "AuditRepository":
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "audit_unavailable", "detail": "DATABASE_URL is not configured - the audit trail requires PostgreSQL."},
+        )
+
+    from zeroshield.audit.repository import AuditRepository
+    from zeroshield.db.session import build_sessionmaker
+
+    return AuditRepository(build_sessionmaker())
+
+
+def get_auth_service(
+    auth_repository: Annotated["AuthRepository", Depends(get_auth_repository)],
+    audit_repository: Annotated["AuditRepository", Depends(get_audit_repository)],
+) -> "AuthService":
+    from zeroshield.auth.service import AuthService
+
+    return AuthService(auth_repository, audit_repository)
+
+
+def get_current_user(
+    auth_service: Annotated["AuthService", Depends(get_auth_service)],
+    session_token: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
+) -> User:
+    """The one dependency every non-public route requires. 401s (never
+    silently treats a missing/expired/invalid session as "no user") on
+    anything wrong with the cookie - a route that wants optional auth does
+    not exist in this application; see docs/V2_SECURITY.md."""
+    if session_token is None:
+        raise HTTPException(status_code=401, detail={"error": "not_authenticated", "detail": "no session cookie was presented"})
+    user = auth_service.get_user_for_session(session_token)
+    if user is None:
+        raise HTTPException(
+            status_code=401, detail={"error": "not_authenticated", "detail": "session is missing, expired, or invalid"}
+        )
+    return user
+
+
+CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def require_role(*roles: Role) -> Callable[..., User]:
+    """Returns a dependency that 403s unless current_user.role is one of
+    `roles` - every route names the exact roles it allows explicitly (no
+    implicit hierarchy), per Step 2's own instruction that "frontend button
+    hiding is not security": this is the backend enforcement point, and it
+    is the ONLY one - every mutating route in this application depends on
+    either this or get_current_user directly, never on nothing."""
+
+    def _check(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+        if current_user.role not in roles:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "forbidden",
+                    "detail": f"role '{current_user.role.value}' is not permitted to perform this action "
+                    f"(requires one of: {', '.join(r.value for r in roles)})",
+                },
+            )
+        return current_user
+
+    return _check

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/layout/AppShell";
+import { authApi } from "@/lib/api";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -21,14 +22,20 @@ export const metadata: Metadata = {
   description: "Continuous mitigation assurance for validated CVE remediations.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Best-effort, never throws (the /login page itself has no session, and
+  // proxy.ts already handles the redirect gate for every other route) -
+  // this is only used for display (username/role badge, logout button),
+  // not as a security check. See components/layout/UserMenu.tsx.
+  const currentUser = await authApi.me().catch(() => null);
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <AppShell>{children}</AppShell>
+        <AppShell currentUser={currentUser}>{children}</AppShell>
       </body>
     </html>
   );

@@ -4,8 +4,9 @@
  * inline on a vulnerability's own page, not a separate nav item), Asset
  * inventory, Control Effectiveness, and the Revalidation queue all now have
  * real backend capability, so they're real nav items below rather than the
- * placeholders they were in Phase 4. Audit Trail remains a real nav item
- * pointing at an honest "not yet built" page - still a Phase 6 item.
+ * placeholders they were in Phase 4. As of V2 Phase 6, Audit Trail is a real
+ * viewer (no longer a placeholder) and Users (ADMIN-only, backend-enforced)
+ * is new.
  */
 export interface NavItem {
   label: string;
@@ -58,6 +59,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "System",
     items: [
+      { label: "Users", href: "/users" },
       { label: "Integrations", href: "/integrations" },
       { label: "Health", href: "/health" },
       { label: "Legacy Dashboard", href: "/legacy-dashboard" },

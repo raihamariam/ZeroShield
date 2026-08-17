@@ -382,8 +382,13 @@ class CreateExperimentVersionRequest(BaseModel):
     mitigation_gap: str
     research_question: str
     hypothesis: str
-    created_by: str
     metrics_to_collect: list[str] | None = None
+    # `created_by` is deliberately NOT a client-supplied field (V2 Phase 6) -
+    # zeroshield.api.routes.studio.create_experiment_version sources it from
+    # the authenticated session (CurrentUser.username). Trusting a
+    # client-supplied identity string here is exactly the gap that would
+    # make "a Researcher must not approve their own experiment" (Step 2)
+    # trivially bypassable by lying about who created a draft.
 
 
 class EditExperimentVersionRequest(BaseModel):
@@ -396,9 +401,13 @@ class EditExperimentVersionRequest(BaseModel):
 
 
 class ApprovalActionRequest(BaseModel):
+    """`actor` is deliberately NOT a field here (V2 Phase 6) - see
+    CreateExperimentVersionRequest's `created_by` note; the actor of an
+    approval transition is always the authenticated session, never
+    client-supplied."""
+
     model_config = ConfigDict(extra="forbid")
 
-    actor: str = Field(min_length=1)
     reason: str | None = None
 
 
@@ -592,8 +601,11 @@ class CreateRevalidationCandidateRequest(BaseModel):
 
 
 class RevalidationDecisionRequest(BaseModel):
+    """`actor` is deliberately NOT a field here (V2 Phase 6) - see
+    ApprovalActionRequest's docstring; the actor is always the authenticated
+    session, never client-supplied."""
+
     model_config = ConfigDict(extra="forbid")
-    actor: str = Field(min_length=1)
     note: str | None = None
 
 
@@ -616,8 +628,11 @@ class AIAssessmentListResponse(BaseModel):
 
 
 class ReviewAssessmentRequest(BaseModel):
+    """`reviewed_by` is deliberately NOT a field here (V2 Phase 6) - see
+    ApprovalActionRequest's docstring; the reviewer is always the
+    authenticated session, never client-supplied."""
+
     model_config = ConfigDict(extra="forbid")
-    reviewed_by: str = Field(min_length=1)
     note: str | None = None
 
 
@@ -643,3 +658,73 @@ class CorrelationListResponse(BaseModel):
 class AffectedAssetListResponse(BaseModel):
     cve_id: str
     assets: list[AssetResponse]
+
+
+# -- Auth / RBAC / audit (V2 Phase 6) ------------------------------------------
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class UserResponse(BaseModel):
+    user_id: str
+    username: str
+    role: str
+    active: bool
+    created_at: str
+    updated_at: str
+
+
+class LoginResponse(BaseModel):
+    user: UserResponse
+
+
+class UserListResponse(BaseModel):
+    users: list[UserResponse]
+
+
+class CreateUserRequest(BaseModel):
+    """ADMIN-only (POST /users). `password` is validated for minimum length
+    here (defense in depth alongside zeroshield.auth.passwords.
+    MIN_PASSWORD_LENGTH) and never appears in any response, log line, or
+    audit event - only its Argon2id hash is ever persisted."""
+
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
+    password: str = Field(min_length=12)
+    role: str = Field(description="One of: viewer, researcher, reviewer, admin.")
+
+
+class UpdateUserRoleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: str = Field(description="One of: viewer, researcher, reviewer, admin.")
+
+
+class UpdateUserActiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    active: bool
+
+
+class AuditEventResponse(BaseModel):
+    audit_id: str
+    occurred_at: str
+    actor_user_id: str | None
+    actor_username: str | None
+    actor_role: str | None
+    action: str
+    target_type: str | None
+    target_id: str | None
+    request_id: str | None
+    metadata: dict[str, Any]
+    previous_state: dict[str, Any] | None
+    new_state: dict[str, Any] | None
+
+
+class AuditEventListResponse(BaseModel):
+    events: list[AuditEventResponse]
+    total: int
+    limit: int
+    offset: int

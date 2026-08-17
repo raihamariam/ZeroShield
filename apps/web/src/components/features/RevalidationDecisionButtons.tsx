@@ -15,13 +15,11 @@ export function RevalidationDecisionButtons({ candidateId }: { candidateId: stri
   const [error, setError] = useState<string | null>(null);
 
   async function decide(action: "approve" | "dismiss") {
-    const actor = typeof window !== "undefined" ? window.prompt("Your name, to record as the reviewer:") : null;
-    if (!actor?.trim()) return;
     setPending(action);
     setError(null);
     try {
       const fn = action === "approve" ? revalidationApi.approveRevalidationCandidate : revalidationApi.dismissRevalidationCandidate;
-      await fn(candidateId, { actor: actor.trim() });
+      await fn(candidateId, {});
       router.refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Action failed.");

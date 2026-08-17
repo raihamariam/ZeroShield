@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from zeroshield.audit.models import Action
 from zeroshield.experiments import find_experiment
 from zeroshield.models.enums import RunEventType
 from zeroshield.observability.metrics import (
@@ -74,6 +75,35 @@ def _record_control_validation(assurance_repository: object, experiment: Any, su
 _TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED, JobStatus.DENIED, JobStatus.FAILED})
 
 
+def _audit(
+    audit_repository: object | None,
+    *,
+    action: str,
+    target_type: str,
+    target_id: str,
+    submitted_by_user_id: str | None,
+    submitted_by_username: str | None,
+    metadata: dict[str, Any],
+) -> None:
+    """Best-effort, auxiliary - like _record_control_validation above, an
+    audit-write failure must never affect job outcome, only be logged.
+    `audit_repository` is typed `object` for the same lazy-import reason as
+    `assurance_repository` (see process_run_job's own docstring). If the job
+    carries no submitter identity (an older queued message, or a caller
+    that predates V2 Phase 6 auth), the event is still written with a null
+    actor rather than skipped - an audit trail with an unattributed event is
+    still more complete than a missing one."""
+    if audit_repository is None:
+        return
+    try:
+        audit_repository.record(  # type: ignore[attr-defined]
+            actor_user_id=submitted_by_user_id, actor_username=submitted_by_username, actor_role=None,
+            action=action, target_type=target_type, target_id=target_id, request_id=None, metadata=metadata,
+        )
+    except Exception:
+        logger.warning("failed to record audit event %s for %s %s", action, target_type, target_id, exc_info=True)
+
+
 def process_run_job(
     job_id: str,
     experiment_id: str,
@@ -84,14 +114,18 @@ def process_run_job(
     job_store: JobStore,
     run_repository: RunRepository | None = None,
     assurance_repository: object | None = None,
+    audit_repository: object | None = None,
+    submitted_by_user_id: str | None = None,
+    submitted_by_username: str | None = None,
 ) -> None:
-    """`assurance_repository`, when provided, is a
-    zeroshield.assurance.repository.AssuranceRepository - typed `object`
-    here (rather than imported at module level) so importing this module
-    never requires the "db"/assurance dependency chain; see
-    _record_control_validation's own guarded import. Optional and
-    additive: omitting it (the default) leaves job processing byte-for-byte
-    identical to before Phase 5."""
+    """`assurance_repository`/`audit_repository`, when provided, are a
+    zeroshield.assurance.repository.AssuranceRepository /
+    zeroshield.audit.repository.AuditRepository - typed `object` here
+    (rather than imported at module level) so importing this module never
+    requires the "db"/assurance/audit dependency chain; see
+    _record_control_validation's/_audit's own guarded usage. All optional
+    and additive: omitting them leaves job processing byte-for-byte
+    identical to before Phases 5/6."""
     existing = job_store.load(job_id)
     submitted_at = existing.submitted_at if existing is not None else datetime.now(UTC)
     started_processing = time.perf_counter()
@@ -150,6 +184,11 @@ def process_run_job(
     except PolicyRefusalError as exc:
         _record(JobStatus.DENIED, error="; ".join(exc.decision.reasons) or "denied by safety policy")
         _emit(RunEventType.DENIED, {"reasons": exc.decision.reasons})
+        _audit(
+            audit_repository, action=Action.RUN_DENIED, target_type="job", target_id=job_id,
+            submitted_by_user_id=submitted_by_user_id, submitted_by_username=submitted_by_username,
+            metadata={"experiment_id": experiment_id, "reasons": exc.decision.reasons},
+        )
         return
     except ExperimentServiceError as exc:
         # exc's message may include server-side absolute filesystem paths (it is shared
@@ -162,11 +201,21 @@ def process_run_job(
             "resolved on this server.",
         )
         _emit(RunEventType.FAILED, {"reason": "service_error"})
+        _audit(
+            audit_repository, action=Action.RUN_FAILED, target_type="job", target_id=job_id,
+            submitted_by_user_id=submitted_by_user_id, submitted_by_username=submitted_by_username,
+            metadata={"experiment_id": experiment_id, "reason": "service_error"},
+        )
         return
     except Exception:
         logger.exception("unhandled error processing job %s", job_id)
         _record(JobStatus.FAILED, error="an internal error occurred")
         _emit(RunEventType.FAILED, {"reason": "internal_error"})
+        _audit(
+            audit_repository, action=Action.RUN_FAILED, target_type="job", target_id=job_id,
+            submitted_by_user_id=submitted_by_user_id, submitted_by_username=submitted_by_username,
+            metadata={"experiment_id": experiment_id, "reason": "internal_error"},
+        )
         return
 
     comparison = summary.comparison_report
@@ -183,6 +232,14 @@ def process_run_job(
         ),
     )
     _emit(RunEventType.COMPLETED, {"total_cases": comparison.total_cases})
+    _audit(
+        audit_repository, action=Action.EVIDENCE_CREATED, target_type="experiment", target_id=experiment_id,
+        submitted_by_user_id=submitted_by_user_id, submitted_by_username=submitted_by_username,
+        metadata={
+            "baseline_run_id": comparison.baseline_run_id, "mitigation_run_id": comparison.mitigation_run_id,
+            "total_cases": comparison.total_cases,
+        },
+    )
 
     if assurance_repository is not None:
         _record_control_validation(assurance_repository, experiment, summary)

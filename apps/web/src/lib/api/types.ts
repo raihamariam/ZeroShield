@@ -366,7 +366,8 @@ export interface CreateExperimentVersionRequest {
   mitigation_gap: string;
   research_question: string;
   hypothesis: string;
-  created_by: string;
+  // created_by is NOT a request field (V2 Phase 6) - the backend derives it
+  // from the authenticated session, never a client-supplied name.
   metrics_to_collect?: string[] | null;
 }
 
@@ -378,7 +379,7 @@ export interface EditExperimentVersionRequest {
 }
 
 export interface ApprovalActionRequest {
-  actor: string;
+  // actor is NOT a request field (V2 Phase 6) - always the authenticated session.
   reason?: string | null;
 }
 
@@ -559,7 +560,7 @@ export interface AIAssessmentListResponse {
 }
 
 export interface ReviewAssessmentRequest {
-  reviewed_by: string;
+  // reviewed_by is NOT a request field (V2 Phase 6) - always the authenticated session.
   note?: string | null;
 }
 
@@ -718,6 +719,68 @@ export interface CreateRevalidationCandidateRequest {
 }
 
 export interface RevalidationDecisionRequest {
-  actor: string;
+  // actor is NOT a request field (V2 Phase 6) - always the authenticated session.
   note?: string | null;
+}
+
+// -- Auth / RBAC / audit (V2 Phase 6) ------------------------------------------
+
+export type Role = "viewer" | "researcher" | "reviewer" | "admin";
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface UserResponse {
+  user_id: string;
+  username: string;
+  role: Role;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoginResponse {
+  user: UserResponse;
+}
+
+export interface UserListResponse {
+  users: UserResponse[];
+}
+
+export interface CreateUserRequest {
+  username: string;
+  password: string;
+  role: Role;
+}
+
+export interface UpdateUserRoleRequest {
+  role: Role;
+}
+
+export interface UpdateUserActiveRequest {
+  active: boolean;
+}
+
+export interface AuditEventResponse {
+  audit_id: string;
+  occurred_at: string;
+  actor_user_id: string | null;
+  actor_username: string | null;
+  actor_role: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  request_id: string | null;
+  metadata: Record<string, unknown>;
+  previous_state: Record<string, unknown> | null;
+  new_state: Record<string, unknown> | null;
+}
+
+export interface AuditEventListResponse {
+  events: AuditEventResponse[];
+  total: number;
+  limit: number;
+  offset: number;
 }

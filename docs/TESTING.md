@@ -6,7 +6,7 @@
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Runs the full suite with **no external services required** — 559+ tests, no Docker/RabbitMQ/MinIO needed (async/queue tests use a fake in-process publisher, exactly as the API does when tested). With coverage:
+Runs the full suite with **no external services required** — 857+ tests, no Docker/RabbitMQ/MinIO/PostgreSQL/live-network needed (async/queue tests use a fake in-process publisher, exactly as the API does when tested; `PostgresRunRepository`/`VulnerabilityRepository`/`ExperimentVersionRepository` tests use an in-memory SQLite engine; connector tests use `httpx.MockTransport` fixtures). With coverage:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q --cov
@@ -27,7 +27,7 @@ Lint and type-check:
 
 | Directory | What it covers |
 |---|---|
-| `tests/unit/` | One subdirectory per `src/zeroshield` package (`models`, `strategies`, `runners`, `services`, `repositories`, `api`, `cli`, `dashboard`, `worker`, ...) — fast, isolated, no real external services. |
+| `tests/unit/` | One subdirectory per `src/zeroshield` package (`models`, `strategies`, `runners`, `services`, `repositories`, `api`, `cli`, `dashboard`, `worker`, `db`, `intelligence`, ...) — fast, isolated, no real external services. `repositories/test_run_repository.py` and `intelligence/test_repository.py` exercise their Postgres-backed repositories against an in-memory SQLite engine, not a live Postgres; `intelligence/connectors/` uses `httpx.MockTransport` fixtures instead of live network. |
 | `tests/policy/` | `SafetyPolicy` and individual `SAFE-*` rules in isolation. |
 | `tests/experiments/` | Fixture experiment definition files (`valid_experiment_example.json`, `invalid_experiment_example.json`) used by model/discovery tests — not itself a test module. |
 | `tests/integration/` | Cross-process, real-interface end-to-end tests: real CLI subprocess, real headless Streamlit rendering, and (opt-in only) a real RabbitMQ broker. See below. |
@@ -60,6 +60,24 @@ $env:ZEROSHIELD_E2E_RABBITMQ_URL = "amqp://guest:guest@localhost:5673/"
 ```
 
 Note port `5673`, not RabbitMQ's default `5672` — see `docker-compose.yml`'s comments and [`docs/CONFIGURATION.md`](CONFIGURATION.md) for why.
+
+## Opting into the real-Postgres migration/run-lifecycle test
+
+`tests/integration/test_worker_postgres_real_db.py` (V2 Platform Foundation phase) runs the real Alembic migration and `PostgresRunRepository` against a **real** PostgreSQL database instead of the in-memory SQLite used by `tests/unit/repositories/test_run_repository.py`. Skipped by default, deliberately has no default host/port to fall back to, for the same reason as the real-broker test above:
+
+```powershell
+docker compose up -d postgres
+$env:ZEROSHIELD_E2E_POSTGRES_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
+.\.venv\Scripts\python.exe -m pytest tests/integration/test_worker_postgres_real_db.py
+```
+
+## Threat Intelligence & Prioritisation tests (`tests/unit/intelligence/`, V2 Phase 2)
+
+Connectors (`tests/unit/intelligence/connectors/`) are tested against `httpx.MockTransport` with fixtures shaped exactly like the official NVD/CISA KEV/FIRST EPSS/GitHub Advisories responses read at implementation time — no live network access, per the phase's own requirement ("do not make CI depend on live internet"). `normalisation`/`dedup`/`priority`/`candidates`/`repository`/`sync_service`/`excel_importer` are tested directly against real logic (in-memory SQLite for the repository, like `tests/unit/repositories/test_run_repository.py`), covering malformed/partial upstream data, merge conflict rules, deterministic priority scoring and explanations, and the `RunRepository`-style failure-isolation guarantee (a `RunRepository`/connector failure never corrupts or blocks sync bookkeeping). No opt-in real-network integration test exists for these connectors, unlike RabbitMQ/Postgres above — intentional, per the phase's mocked-fixtures-only instruction.
+
+## Advanced Validation Platform tests (`tests/unit/domain_packs/`, `tests/unit/templates/`, `tests/unit/generators/`, `tests/unit/sandbox/`, `tests/unit/verdict/`, `tests/unit/studio/`, V2 Phase 3)
+
+Domain Pack/template registration and unknown-id rejection; deterministic dataset generation (same seed+config → byte-identical SHA-256) verified against the *real* strategies (every generated case's `expected_outcome` is checked against what `StrictSchemaCanonicalisationMitigation`/`StrictGrammarStateMachineMitigation` actually decide, not asserted independently); the full approval state machine including every illegal-transition/bypass-attempt combination and an explicit proof that an approved version is still independently evaluated by the real `SafetyPolicy`; sandbox timeout/network-guard/allow-list/workspace-cleanup (including cleanup-on-exception); verdict thresholds for all five labels plus incomplete-metrics and regression-vs-previous-run cases; and `tests/unit/studio/test_studio_migration.py`, which builds Domain-Pack/template-based equivalents of `ZC-VPN-EXP-001`/`ZC-TELECOM-EXP-001` and runs both old and new through the identical, unmodified trusted core (Step 9).
 
 ## Known gaps (not covered by this suite)
 

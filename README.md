@@ -6,6 +6,13 @@ Status: **Milestones 1–30 complete** — the core validation engine (experimen
 
 Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
 
+**V2 status:** ZeroShield is evolving into "ZeroShield — Continuous Mitigation Assurance Platform" per `ZeroShield Improvement Plan.docx`'s six-phase roadmap, preserving and extending the V1 core above rather than replacing it.
+
+- **Phase 1 (Platform Foundation) is complete**: PostgreSQL + Alembic migrations for a rich, auditable run-lifecycle event trail (`zeroshield.repositories.PostgresRunRepository`, additive to the existing file-based job status), and MinIO as the default evidence backend for the containerised (Docker Compose) deployment. Both are optional infrastructure — every existing CLI/dashboard/bare-Python/test workflow above is unchanged and requires neither. See [`docs/ARCHITECTURE.md` §6a](docs/ARCHITECTURE.md#6a-v2-platform-foundation-postgresql-run-lifecycle-system-of-record).
+- **Phase 2 (Threat Intelligence & Prioritisation) is complete**: automated NVD/CISA KEV/EPSS/GitHub Advisory ingestion, deduplication, field-level history, and a deterministic, explainable ZeroShield Validation Priority identifying VPN/Telecom `ValidationCandidate`s — replacing the manual CVE-to-Excel-to-experiment workflow (the workbook remains importable, never auto-executes anything). No AI. New endpoints: `GET /vulnerabilities`, `GET /priority-queue`, `GET /sources`/`/integrations`, `POST /intelligence/sync`. Requires `DATABASE_URL` (PostgreSQL is the system of record here, not optional). See [`docs/ARCHITECTURE.md` §6b](docs/ARCHITECTURE.md#6b-v2-phase-2-threat-intelligence--prioritisation) and [`docs/HANDOVER.md`](docs/HANDOVER.md#threat-intelligence--prioritisation-v2-phase-2).
+- **Phase 3 (Advanced Validation Platform) is complete**: a Domain Pack framework (VPN/Telecom, migrating the existing strategies unchanged), versioned Validation Templates, deterministic synthetic dataset generators, an Experiment Studio backend that replaces hand-authoring experiment JSON, an explicit DRAFT→READY_FOR_REVIEW→UNDER_REVIEW→APPROVED/REJECTED→RETIRED approval workflow (never bypassing `SafetyPolicy`), a strengthened local `SandboxExecutor` (allow-list, timeout, network guard, resource limits — not Kubernetes), and a deterministic, threshold-based verdict engine. New endpoints: `GET /domain-packs`, `POST /experiment-versions`, the approval-transition routes, `POST /experiment-versions/{id}/runs`, `GET /experiments/{id}/verdict`. No AI. See [`docs/ARCHITECTURE.md` §6c](docs/ARCHITECTURE.md#6c-v2-phase-3-advanced-validation-platform) and [`docs/HANDOVER.md`](docs/HANDOVER.md#advanced-validation-platform-v2-phase-3).
+- **Phase 4 (Professional Web Application) is complete**: a Next.js/React/TypeScript app (`apps/web/`) is now the primary ZeroShield interface, consuming FastAPI exclusively (never Postgres/MinIO/RabbitMQ/Python directly). Mission Control dashboard, Threat Intelligence (searchable vulnerabilities, priority queue), a multi-step Experiment Studio wizard (CVE → domain pack → template → dataset config → metrics → narrative → draft/submit), Approvals, a live SSE-driven Runs view, per-experiment Results/Verdict, an Evidence Vault, and System/Integrations/Health views. The Streamlit dashboard (below) is kept as a legacy, read-only view — its run-execution path is disabled so it can't bypass the web app's approval-gated workflow. Runs alongside the rest of the stack via `docker compose up` (port 3001) or standalone (`cd apps/web && npm run dev`). See [`apps/web/README.md`](apps/web/README.md).
+
 This README covers step-by-step walkthroughs for each interface. For a narrower, more formal reference, see `docs/`:
 
 - [`docs/HANDOVER.md`](docs/HANDOVER.md) — what ZeroShield is, setup, execution, extension, and safety controls, in one place (the SRS's required "handover guide").
@@ -16,9 +23,22 @@ This README covers step-by-step walkthroughs for each interface. For a narrower,
 - [`docs/TESTING.md`](docs/TESTING.md) — the test suite in detail, including the security suite and known gaps.
 - [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) — the Milestone 30 requirement-by-requirement SRS compliance review and D-05 (evidence retention policy) resolution.
 
-## Running the ZeroShield Dashboard
+## Running the ZeroShield Web Application
 
-ZeroShield includes a visual dashboard so you can run and inspect experiments without using the command line or reading any code. This section assumes you have never used a terminal before.
+The primary way to use ZeroShield (V2 Phase 4) - a full web app (`apps/web/`) covering
+Mission Control, Threat Intelligence, Experiment Studio, Approvals, live runs,
+verdicts/evidence, and system health, with no terminal, Swagger, or JSON editing
+required day-to-day. The easiest way to run it is the same `docker compose up` command
+in [Running ZeroShield with Docker](#running-zeroshield-with-docker) below - it starts
+this app alongside everything else on <http://localhost:3001>. See
+[`apps/web/README.md`](apps/web/README.md) for running it standalone (`npm run dev`)
+against an already-running API.
+
+## Running the ZeroShield Dashboard (legacy)
+
+ZeroShield's original visual dashboard, kept read-only for browsing existing
+experiments/results/evidence - use the web application above to submit a run. This
+section assumes you have never used a terminal before.
 
 ### 1. Open a terminal in the project folder
 
@@ -204,16 +224,32 @@ docker run --rm zeroshield:latest zeroshield --help
 
 ## Optional: MinIO evidence storage
 
-By default, ZeroShield stores evidence (manifests, results, comparisons) as plain files under `results/`. As of Milestone 22, an S3-compatible alternative (`MinioEvidenceRepository`, in `zeroshield.repositories`) is also available, backed by [MinIO](https://min.io) — proving the evidence-storage design can be swapped without touching any research/orchestration code. It is **not** the default: the CLI, dashboard, API, and worker all still use local file storage unless you write your own script that constructs a `MinioEvidenceRepository` and passes it to `zeroshield.orchestration.execute_and_generate_evidence` yourself.
+By default, ZeroShield stores evidence (manifests, results, comparisons) as plain files under `results/`. As of Milestone 22, an S3-compatible alternative (`MinioEvidenceRepository`, in `zeroshield.repositories`) is also available, backed by [MinIO](https://min.io) — proving the evidence-storage design can be swapped without touching any research/orchestration code.
 
-To try it:
+Running via Docker Compose (`docker compose up`) now uses MinIO as the default evidence backend for the `worker`/`dashboard` services (V2 Platform Foundation phase — set via `ZEROSHIELD_EVIDENCE_BACKEND=minio` in `docker-compose.yml`). Running natively without Docker (or under `pytest`), the default remains local file storage — nothing changes unless you set `ZEROSHIELD_EVIDENCE_BACKEND=minio` yourself. The CLI always uses local file storage regardless.
+
+To select MinIO manually outside Docker:
 
 ```powershell
 docker compose up -d minio
 .\.venv\Scripts\python.exe -m pip install -e ".[storage,dev]"
+$env:ZEROSHIELD_EVIDENCE_BACKEND = "minio"
 ```
 
-Then, in Python, use `zeroshield.repositories.minio_evidence_repository.default_minio_client()` (reads `MINIO_ENDPOINT`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`/`MINIO_SECURE`, defaulting to `localhost:9002` with the credentials set in `docker-compose.yml`) together with `MinioEvidenceRepository(client, bucket_name)` in place of `LocalEvidenceRepository`. The MinIO web console is at `http://localhost:9003` (login `zeroshield`/`zeroshield123`) if you want to browse stored evidence visually.
+Or construct one directly in Python: `zeroshield.repositories.minio_evidence_repository.default_minio_client()` (reads `MINIO_ENDPOINT`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`/`MINIO_SECURE`, defaulting to `localhost:9002` with the credentials set in `docker-compose.yml`) together with `MinioEvidenceRepository(client, bucket_name)` in place of `LocalEvidenceRepository`. The MinIO web console is at `http://localhost:9003` (login `zeroshield`/`zeroshield123`) if you want to browse stored evidence visually.
+
+## Optional: PostgreSQL run-lifecycle history
+
+As of the V2 Platform Foundation phase, ZeroShield can additionally record a rich, auditable run-lifecycle trail (`QUEUED → PREPARING → SAFETY_CHECK → RUNNING_BASELINE → RUNNING_MITIGATION → ANALYSING → GENERATING_EVIDENCE → COMPLETED`, or `DENIED`/`FAILED`) to PostgreSQL, alongside the existing file-based job status you already poll via `GET /jobs/{job_id}` (unchanged). This is **not** required to run ZeroShield: with no `DATABASE_URL` set, the API/worker use a no-op repository and behave exactly as before.
+
+Running via Docker Compose starts a `postgres` service and wires `DATABASE_URL` for `api`/`worker` automatically. To try it outside Docker:
+
+```powershell
+docker compose up -d postgres
+.\.venv\Scripts\python.exe -m pip install -e ".[db,dev]"
+$env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
 
 ## Optional: Prometheus & Grafana monitoring
 

@@ -59,7 +59,68 @@ Implement `zeroshield.strategies.base.ProcessingStrategy` (one method: `process(
 
 ### Adding a new evidence storage backend
 
-Implement `zeroshield.repositories.evidence_repository.EvidenceRepository` (`save_run_evidence`, `load_manifest`, `save_comparison`) — see `LocalEvidenceRepository` (default) and `MinioEvidenceRepository` (optional, `storage` extra) for reference implementations. `zeroshield.orchestration.execute_and_generate_evidence` depends only on the ABC, never a concrete class, so a new backend needs no orchestration changes.
+Implement `zeroshield.repositories.evidence_repository.EvidenceRepository` (`save_run_evidence`, `load_manifest`, `save_comparison`) — see `LocalEvidenceRepository` (default) and `MinioEvidenceRepository` (optional, `storage` extra) for reference implementations. `zeroshield.orchestration.execute_and_generate_evidence` depends only on the ABC, never a concrete class, so a new backend needs no orchestration changes. Which backend is selected by default is controlled by `ZEROSHIELD_EVIDENCE_BACKEND` (`local`, the default, or `minio`) — see [`docs/CONFIGURATION.md`](CONFIGURATION.md).
+
+### The run-lifecycle system of record (V2 Platform Foundation)
+
+Every async run submitted via `POST /experiments/{id}/runs` now also records a rich lifecycle trail through `zeroshield.repositories.RunRepository` — `QUEUED` (API, best-effort) through `PREPARING`/`SAFETY_CHECK`/`RUNNING_BASELINE`/`RUNNING_MITIGATION`/`ANALYSING`/`GENERATING_EVIDENCE`/`COMPLETED` (worker, emitted from the real execution path via an `event_sink` callback threaded through `ExperimentRunner.run()` → `execute_and_generate_evidence()` → `experiment_service.run_experiment()`), or `DENIED`/`FAILED`. This is additive to, not a replacement for, the existing `JobStore` file-based job status API clients poll via `GET /jobs/{job_id}` — that contract is unchanged.
+
+`RunRepository` defaults to `NullRunRepository` (a no-op) unless `DATABASE_URL` is set, in which case `PostgresRunRepository` (requires the `db` extra: `sqlalchemy`, `alembic`, `psycopg`) persists events to PostgreSQL. Apply the schema with:
+
+```powershell
+$env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+A `RunRepository` failure (e.g. Postgres unreachable) is always caught and logged — it can never block or alter job submission/processing, since it is auxiliary observability, never a safety authority. See [`docs/ARCHITECTURE.md` §6a](ARCHITECTURE.md#6a-v2-platform-foundation-postgresql-run-lifecycle-system-of-record).
+
+### Threat Intelligence & Prioritisation (V2 Phase 2)
+
+`GET /vulnerabilities`, `GET /priority-queue`, `GET /sources`/`/integrations`, and `POST /intelligence/sync` (+ `GET /intelligence/syncs[/​{sync_id}]`) automate CVE research from NVD, CISA KEV, FIRST EPSS, and GitHub Security Advisories into a deterministic, explainable ZeroShield Validation Priority and VPN/Telecom `ValidationCandidate` records — replacing the manual CVE-to-Excel-to-experiment workflow. No AI is involved anywhere in this pipeline.
+
+Unlike `RunRepository`, `DATABASE_URL` is **required** for every intelligence route/worker (503 without it) — PostgreSQL is the system of record here (Step 1 of the phase), not optional auxiliary observability. Apply the schema and try a sync:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[api,intelligence,db,dev]"
+$env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m uvicorn zeroshield.api.app:app --reload
+# in another terminal:
+.\.venv\Scripts\python.exe -m pip install -e ".[queue,intelligence,db]"
+.\.venv\Scripts\python.exe -m zeroshield.worker.intelligence_main
+```
+
+Then `POST /intelligence/sync` with `{"source": "cisa_kev"}` in Swagger and poll `GET /intelligence/syncs/{sync_id}`. The existing research workbook (`telecom_vpn_cve_zero_click.xlsx`) remains importable via `zeroshield.intelligence.excel_importer.import_and_merge()` — it never creates, modifies, or runs an `ExperimentDefinition`. See [`docs/ARCHITECTURE.md` §6b](ARCHITECTURE.md#6b-v2-phase-2-threat-intelligence--prioritisation) for the full design, and the Phase 2 Completion Report for connector/scoring details and known limitations.
+
+### Advanced Validation Platform (V2 Phase 3)
+
+Researchers can now build a VPN or Telecom experiment through `POST /experiment-versions` (Domain Pack + Validation Template + a deterministic generator config) instead of hand-authoring an experiment JSON file. The workflow: create a DRAFT → `submit-review` → `start-review` → `approve` (or `reject`) → `POST /experiment-versions/{id}/runs` (only once `APPROVED`) → poll the job the same way as any other run → `GET /experiments/{id}/verdict` for a deterministic, threshold-based outcome. Approval never bypasses `SafetyPolicy` - it only sets `ExperimentVersion.definition.approval_status` in lockstep with the workflow state, and the real, unmodified `SafetyPolicy.evaluate()` still runs at execution time, every time.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[api,db,dev]"
+$env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m uvicorn zeroshield.api.app:app --reload
+```
+
+Try `GET /domain-packs` and `GET /domain-packs/vpn/templates` in Swagger first to see what's available, then `POST /datasets/generate` to preview a synthetic dataset before committing to a draft. See [`docs/ARCHITECTURE.md` §6c](ARCHITECTURE.md#6c-v2-phase-3-advanced-validation-platform) for the full design, and the Phase 3 Completion Report for the approval state machine, sandbox controls, verdict thresholds, and known limitations.
+
+### AI Research Analyst & Continuous Assurance (V2 Phase 5)
+
+ZeroShield now accumulates knowledge over time instead of only running isolated experiments: an advisory-only AI Research Analyst (CVE explanation, failure-pattern classification, mitigation-gap analysis, similarity narration, template recommendation, draft experiment proposals), deterministic CVE correlation, a small asset inventory, a Control/ControlVersion/ControlValidation model with effectiveness aggregation, deterministic regression detection, and a human-reviewed revalidation queue. **AI is advisory only, everywhere** - it cannot approve experiments, bypass `SafetyPolicy`, modify evidence, execute code, or change a verdict; see [`docs/ARCHITECTURE.md` §6d](ARCHITECTURE.md#6d-v2-phase-5-ai--continuous-assurance) for the full design and the Phase 5 Completion Report for the AI safety-boundary tests.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[api,db,ai,dev]"
+$env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+# optional - AI features work fully without this; every /analyst/* route
+# just answers 503 "ai_unavailable" instead, with no other effect:
+$env:AI_PROVIDER = "anthropic"
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+.\.venv\Scripts\python.exe -m uvicorn zeroshield.api.app:app --reload
+```
+
+Try `POST /vulnerabilities/{cve_id}/analyst/mitigation-gap` and `GET /vulnerabilities/{cve_id}/correlations` in Swagger, then `GET /ai-assessments` to see the persisted, `reviewed=False` result - only `POST /ai-assessments/{id}/review` marks it reviewed, never any automatic process. `POST /revalidation/scan` runs the deterministic trigger scan; `GET /controls/{id}/effectiveness` shows the aggregated trend plus a regression banner once ≥2 same-version validations exist. The `apps/web` Next.js UI (V2 Phase 4's application shell) surfaces all of this on the vulnerability, Assets, Controls, and Revalidation pages, plus a "new critical AI assessments / active regressions / pending revalidations" summary on Mission Control.
 
 ## 5. Safety controls
 

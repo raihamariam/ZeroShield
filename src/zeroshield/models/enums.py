@@ -74,3 +74,50 @@ class MetricName(str, Enum):
     PARSER_REACH_RATE = "parser_reach_rate"
     MEAN_LATENCY_MS = "mean_latency_ms"
     LOG_COMPLETENESS_RATE = "log_completeness_rate"
+
+
+class RunEventType(str, Enum):
+    """The rich async-run lifecycle, per the V2 Improvement Plan §4.5
+    (Experiment Lifecycle). Recorded by zeroshield.repositories.run_repository
+    implementations - a bookkeeping/observability trail, like JobStatus, not
+    a core SRS-traced domain entity and never a safety authority: every
+    transition is recorded *after* SafetyPolicy/ExperimentRunner have already
+    decided the outcome, never before."""
+
+    QUEUED = "queued"
+    PREPARING = "preparing"
+    SAFETY_CHECK = "safety_check"
+    RUNNING_BASELINE = "running_baseline"
+    RUNNING_MITIGATION = "running_mitigation"
+    ANALYSING = "analysing"
+    GENERATING_EVIDENCE = "generating_evidence"
+    COMPLETED = "completed"
+    DENIED = "denied"
+    FAILED = "failed"
+
+
+class ExperimentVersionStatus(str, Enum):
+    """Experiment Studio's approval workflow (V2 Phase 3, Step 5) - deliberately
+    distinct from ApprovalStatus (the trusted-core field SAFE-004 checks): this
+    is the *workflow* state a draft moves through before it is ever allowed to
+    carry ApprovalStatus.APPROVED. See zeroshield.studio.approval for the
+    explicit allowed-transition table."""
+
+    DRAFT = "draft"
+    READY_FOR_REVIEW = "ready_for_review"
+    UNDER_REVIEW = "under_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    RETIRED = "retired"
+
+
+class VerdictLabel(str, Enum):
+    """Deterministic, explainable run verdict (V2 Phase 3, Step 7) - computed
+    only from measured metrics/thresholds (zeroshield.verdict.engine), never by
+    a model or human judgement call."""
+
+    EFFECTIVE = "effective"
+    PARTIALLY_EFFECTIVE = "partially_effective"
+    INEFFECTIVE = "ineffective"
+    REGRESSION = "regression"
+    INCONCLUSIVE = "inconclusive"

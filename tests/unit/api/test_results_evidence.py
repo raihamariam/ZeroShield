@@ -1,3 +1,5 @@
+import io
+import zipfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -82,6 +84,30 @@ def test_evidence_after_real_run_is_integrity_verified(
     assert body["mitigation"]["integrity_verified"] is True
     assert body["baseline"]["mode"] == "baseline"
     assert body["mitigation"]["mode"] == "mitigated"
+
+
+def test_evidence_bundle_not_found_before_any_run(client: TestClient) -> None:
+    response = client.get("/experiments/ZC-VPN-EXP-001/evidence/bundle")
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "evidence_not_found"
+
+
+def test_evidence_bundle_after_real_run_contains_manifests_and_comparison(
+    client: TestClient, results_root: Path, jobs_dir: Path
+) -> None:
+    job_body = _run_vpn(client, results_root, jobs_dir)
+    result = job_body["result"]
+
+    response = client.get("/experiments/ZC-VPN-EXP-001/evidence/bundle")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "ZC-VPN-EXP-001-evidence.zip" in response.headers["content-disposition"]
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        names = set(zf.namelist())
+        assert "comparison.json" in names
+        assert f"{result['baseline_run_id']}/manifest.json" in names
+        assert f"{result['mitigation_run_id']}/manifest.json" in names
 
 
 def test_evidence_detects_tampering(client: TestClient, results_root: Path, jobs_dir: Path) -> None:

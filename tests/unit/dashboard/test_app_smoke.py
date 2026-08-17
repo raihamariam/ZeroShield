@@ -21,7 +21,12 @@ def test_app_boots_with_no_exceptions() -> None:
     assert not at.exception
 
 
-def test_vpn_run_through_dashboard_completes_with_no_exceptions() -> None:
+def test_vpn_dashboard_run_tab_is_read_only_and_points_at_the_web_app() -> None:
+    """As of Phase 4 (see zeroshield.dashboard.app's module docstring),
+    render_safety_and_run no longer executes anything in-process - it only
+    shows the safety-policy check plus a pointer to the web app's
+    approval-gated run path. There is deliberately no run button/key for
+    this test to click any more."""
     at = AppTest.from_file(str(APP_PATH))
     at.run(timeout=30)
 
@@ -31,8 +36,8 @@ def test_vpn_run_through_dashboard_completes_with_no_exceptions() -> None:
 
     radio = at.tabs[1].radio[0]
     at.tabs[1].radio[0].set_value(radio.options[1]).run(timeout=30)  # local_unit_test
-
-    at.button(key="run_ZC-VPN-EXP-001").click().run(timeout=30)
     assert not at.exception
-    success_messages = " ".join(m.value for m in at.tabs[1].success)
-    assert "Run complete: 22 cases" in success_messages
+
+    assert not any(b.key == "run_ZC-VPN-EXP-001" for b in at.tabs[1].button)
+    info_messages = " ".join(m.value for m in at.tabs[1].info)
+    assert "moved to the ZeroShield web application" in info_messages

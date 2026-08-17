@@ -114,6 +114,79 @@ def test_full_round_trip_denied_run_shows_denied_with_reason(
     assert not results_root.exists()
 
 
+def test_list_jobs_is_empty_when_none_submitted(client: TestClient) -> None:
+    response = client.get("/jobs")
+    assert response.status_code == 200
+    assert response.json() == {"jobs": []}
+
+
+def test_list_jobs_shows_most_recent_first_and_supports_status_filter(
+    client: TestClient, results_root: Path, jobs_dir: Path
+) -> None:
+    vpn_job_id = client.post(
+        "/experiments/ZC-VPN-EXP-001/runs", json={"execution_context": "local_unit_test"}
+    ).json()["job_id"]
+    telecom_job_id = client.post(
+        "/experiments/ZC-TELECOM-EXP-001/runs", json={"execution_context": "local_unit_test"}
+    ).json()["job_id"]
+
+    process_run_job(
+        telecom_job_id,
+        "ZC-TELECOM-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=results_root,
+        job_store=JobStore(jobs_dir),
+    )
+
+    all_jobs = client.get("/jobs").json()["jobs"]
+    assert [j["job_id"] for j in all_jobs] == [telecom_job_id, vpn_job_id]
+
+    queued_only = client.get("/jobs", params={"status": "queued"}).json()["jobs"]
+    assert [j["job_id"] for j in queued_only] == [vpn_job_id]
+
+    completed_only = client.get("/jobs", params={"status": "completed"}).json()["jobs"]
+    assert [j["job_id"] for j in completed_only] == [telecom_job_id]
+
+
+def test_get_events_for_unknown_job_returns_404(client: TestClient) -> None:
+    response = client.get("/jobs/" + "JOB-" + "0" * 32 + "/events")
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "job_not_found"
+
+
+def test_get_events_for_wrong_shape_id_returns_422(client: TestClient) -> None:
+    response = client.get("/jobs/not-a-valid-job-id/events")
+    assert response.status_code == 422
+
+
+def test_events_stream_for_completed_job_degrades_honestly_without_database_url(
+    client: TestClient, results_root: Path, jobs_dir: Path
+) -> None:
+    """No DATABASE_URL is configured in the test environment, so get_run_repository
+    returns NullRunRepository - list_events is always []. The stream must still
+    terminate immediately (the job is already completed) and report the real
+    JobStore status, never a fabricated per-stage RunEvent trail."""
+    job_id = client.post(
+        "/experiments/ZC-VPN-EXP-001/runs", json={"execution_context": "local_unit_test"}
+    ).json()["job_id"]
+    process_run_job(
+        job_id,
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=results_root,
+        job_store=JobStore(jobs_dir),
+    )
+
+    response = client.get(f"/jobs/{job_id}/events")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: job_terminal" in response.text
+    assert '"job_status": "completed"' in response.text
+    assert "event: run_event" not in response.text
+
+
 def test_full_round_trip_telecom_run_completes(
     client: TestClient, results_root: Path, jobs_dir: Path
 ) -> None:

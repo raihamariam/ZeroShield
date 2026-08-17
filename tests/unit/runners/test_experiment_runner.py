@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from zeroshield.models import ApprovalStatus, Decision, ExperimentDefinition
+from zeroshield.models.enums import RunEventType
 from zeroshield.policies import ExecutionContext
 from zeroshield.runners import ExperimentRunner, PolicyRefusalError
 from zeroshield.strategies import ProcessingStrategy, StrategyOutcome
@@ -333,3 +334,87 @@ def test_dataset_domain_mismatch_rejected(tmp_path: Path) -> None:
             git_commit="abc1234",
             execution_context=ExecutionContext.LOCAL_UNIT_TEST,
         )
+
+
+def test_event_sink_receives_safety_check_then_baseline_then_mitigation_in_order(
+    tmp_path: Path,
+) -> None:
+    """Rich RunEvent instrumentation (V2 Platform Foundation phase) must reflect the
+    real execution order - safety is evaluated before any case runs, per FR-011."""
+    case_ids = ["TC-001"]
+    dataset_path = tmp_path / "dataset.json"
+    _write_generic_dataset(dataset_path, case_ids)
+
+    baseline = _RecordingAcceptAllStrategy("telecom_stub_baseline")
+    mitigation = _RecordingAcceptAllStrategy("telecom_stub_mitigation")
+    experiment = _telecom_experiment("telecom_stub_baseline", "telecom_stub_mitigation")
+
+    events: list[RunEventType] = []
+    ExperimentRunner().run(
+        experiment,
+        dataset_path,
+        baseline=baseline,
+        mitigation=mitigation,
+        baseline_run_id="RUN-001",
+        mitigation_run_id="RUN-002",
+        git_commit="abc1234",
+        execution_context=ExecutionContext.LOCAL_UNIT_TEST,
+        event_sink=lambda event_type, detail: events.append(event_type),
+    )
+
+    assert events == [
+        RunEventType.SAFETY_CHECK,
+        RunEventType.RUNNING_BASELINE,
+        RunEventType.RUNNING_MITIGATION,
+    ]
+
+
+def test_event_sink_receives_only_safety_check_when_policy_refuses(tmp_path: Path) -> None:
+    """A denied run must never emit RUNNING_BASELINE/RUNNING_MITIGATION - no case ever executes."""
+    case_ids = ["TC-001"]
+    dataset_path = tmp_path / "dataset.json"
+    _write_generic_dataset(dataset_path, case_ids)
+
+    baseline = _RecordingAcceptAllStrategy("telecom_stub_baseline")
+    mitigation = _RecordingAcceptAllStrategy("telecom_stub_mitigation")
+    experiment = _telecom_experiment("telecom_stub_baseline", "telecom_stub_mitigation")
+
+    events: list[RunEventType] = []
+    with pytest.raises(PolicyRefusalError):
+        ExperimentRunner().run(
+            experiment,
+            dataset_path,
+            baseline=baseline,
+            mitigation=mitigation,
+            baseline_run_id="RUN-001",
+            mitigation_run_id="RUN-002",
+            git_commit="abc1234",
+            execution_context=ExecutionContext.EXPERIMENT_RUN,
+            event_sink=lambda event_type, detail: events.append(event_type),
+        )
+
+    assert events == [RunEventType.SAFETY_CHECK]
+
+
+def test_event_sink_is_optional_and_defaults_to_none(tmp_path: Path) -> None:
+    """Every existing caller (CLI/dashboard/service layer prior to this phase) omits
+    event_sink entirely - it must remain fully optional with no behaviour change."""
+    case_ids = ["TC-001"]
+    dataset_path = tmp_path / "dataset.json"
+    _write_generic_dataset(dataset_path, case_ids)
+
+    baseline = _RecordingAcceptAllStrategy("telecom_stub_baseline")
+    mitigation = _RecordingAcceptAllStrategy("telecom_stub_mitigation")
+    experiment = _telecom_experiment("telecom_stub_baseline", "telecom_stub_mitigation")
+
+    result = ExperimentRunner().run(
+        experiment,
+        dataset_path,
+        baseline=baseline,
+        mitigation=mitigation,
+        baseline_run_id="RUN-001",
+        mitigation_run_id="RUN-002",
+        git_commit="abc1234",
+        execution_context=ExecutionContext.LOCAL_UNIT_TEST,
+    )
+    assert len(result.baseline.case_results) == 1

@@ -1,12 +1,16 @@
 import json
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from zeroshield.models import ApprovalStatus
+from zeroshield.models.enums import RunEventType
 from zeroshield.observability.metrics import (
     WORKER_JOB_DURATION_SECONDS,
     WORKER_JOBS_PROCESSED_TOTAL,
 )
 from zeroshield.policies import ExecutionContext
+from zeroshield.repositories import RunEvent, RunRepository
 from zeroshield.services.job_store import JobStatus, JobStore
 from zeroshield.worker.processor import process_run_job
 
@@ -323,3 +327,166 @@ def test_process_run_job_running_status_does_not_count_as_terminal(tmp_path: Pat
 
     # "running" is never a valid label value for this counter - it should stay at 0
     assert _counter_value(WORKER_JOBS_PROCESSED_TOTAL, status="running") == before_completed == 0.0
+
+
+class _RecordingRunRepository(RunRepository):
+    """In-memory RunRepository fake for asserting event order/content without a database."""
+
+    def __init__(self) -> None:
+        self.events: list[RunEvent] = []
+
+    def record_event(
+        self,
+        run_id: str,
+        experiment_id: str,
+        event_type: RunEventType,
+        *,
+        execution_context: str | None = None,
+        detail: dict[str, Any] | None = None,
+        clock: Any = lambda: datetime.now(UTC),
+    ) -> RunEvent:
+        event = RunEvent(
+            run_id=run_id,
+            experiment_id=experiment_id,
+            event_type=event_type,
+            occurred_at=clock(),
+            detail=detail,
+        )
+        self.events.append(event)
+        return event
+
+    def list_events(self, run_id: str) -> list[RunEvent]:
+        return [e for e in self.events if e.run_id == run_id]
+
+
+class _RaisingRunRepository(RunRepository):
+    """Simulates Postgres being unreachable - every call raises."""
+
+    def record_event(self, *args: Any, **kwargs: Any) -> RunEvent:
+        raise ConnectionError("simulated database outage")
+
+    def list_events(self, run_id: str) -> list[RunEvent]:
+        raise ConnectionError("simulated database outage")
+
+
+def test_process_run_job_records_full_event_lifecycle_on_completion(tmp_path: Path) -> None:
+    run_repository = _RecordingRunRepository()
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-events-completed",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+        run_repository=run_repository,
+    )
+
+    event_types = [e.event_type for e in run_repository.list_events("JOB-events-completed")]
+    assert event_types == [
+        RunEventType.PREPARING,
+        RunEventType.SAFETY_CHECK,
+        RunEventType.RUNNING_BASELINE,
+        RunEventType.RUNNING_MITIGATION,
+        RunEventType.ANALYSING,
+        RunEventType.GENERATING_EVIDENCE,
+        RunEventType.COMPLETED,
+    ]
+    assert all(e.experiment_id == "ZC-VPN-EXP-001" for e in run_repository.events)
+
+
+def test_process_run_job_records_denied_event(tmp_path: Path) -> None:
+    run_repository = _RecordingRunRepository()
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-events-denied",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.EXPERIMENT_RUN,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+        run_repository=run_repository,
+    )
+
+    event_types = [e.event_type for e in run_repository.list_events("JOB-events-denied")]
+    assert event_types == [RunEventType.PREPARING, RunEventType.SAFETY_CHECK, RunEventType.DENIED]
+
+
+def test_process_run_job_records_failed_event_for_missing_experiment(tmp_path: Path) -> None:
+    run_repository = _RecordingRunRepository()
+    job_store = JobStore(tmp_path / "jobs")
+    empty_dir = tmp_path / "no_experiments_here"
+    empty_dir.mkdir()
+
+    process_run_job(
+        "JOB-events-missing",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=empty_dir,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+        run_repository=run_repository,
+    )
+
+    event_types = [e.event_type for e in run_repository.list_events("JOB-events-missing")]
+    assert event_types == [RunEventType.FAILED]
+
+
+def test_process_run_job_defaults_to_null_run_repository_when_omitted(tmp_path: Path) -> None:
+    """run_repository is fully optional - omitting it must behave exactly as before
+    this phase, per V1 compatibility."""
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-no-repo",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+    )
+    record = job_store.load("JOB-no-repo")
+    assert record is not None
+    assert record.status == JobStatus.COMPLETED
+
+
+def test_process_run_job_completes_normally_even_if_run_repository_is_unreachable(
+    tmp_path: Path,
+) -> None:
+    """A RunRepository failure (e.g. Postgres down) is auxiliary observability - it
+    must never interrupt or alter the actual job outcome, only be logged."""
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-db-down",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.LOCAL_UNIT_TEST,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+        run_repository=_RaisingRunRepository(),
+    )
+    record = job_store.load("JOB-db-down")
+    assert record is not None
+    assert record.status == JobStatus.COMPLETED
+    assert record.result is not None
+    assert record.result.total_cases == 22
+    assert (tmp_path / "results" / "ZC-VPN-EXP-001" / "comparison.json").is_file()
+
+
+def test_process_run_job_denial_completes_normally_even_if_run_repository_is_unreachable(
+    tmp_path: Path,
+) -> None:
+    job_store = JobStore(tmp_path / "jobs")
+    process_run_job(
+        "JOB-db-down-denied",
+        "ZC-VPN-EXP-001",
+        ExecutionContext.EXPERIMENT_RUN,
+        experiments_dir=EXPERIMENTS_DIR,
+        results_root=tmp_path / "results",
+        job_store=job_store,
+        run_repository=_RaisingRunRepository(),
+    )
+    record = job_store.load("JOB-db-down-denied")
+    assert record is not None
+    assert record.status == JobStatus.DENIED
+    assert record.error is not None
+    assert "SAFE-004" in record.error

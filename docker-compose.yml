@@ -32,8 +32,52 @@
 # compose up` (all services) works out of the box even if something else on
 # the host - e.g. a locally-run `streamlit run` from outside Docker - is
 # already using 8501. The container's internal port is still 8501.
+#
+# postgres (V2 Platform Foundation phase) is the structured system of record
+# for the rich run-lifecycle event trail (zeroshield.repositories.
+# PostgresRunRepository) - api/worker read DATABASE_URL to use it; with no
+# DATABASE_URL set (e.g. running the API/worker natively without Docker),
+# they fall back to the no-op NullRunRepository, so nothing here is a hard
+# requirement to run ZeroShield. Its host port is 5433, not Postgres's
+# default 5432, for the same non-default-port reason documented above for
+# rabbitmq/minio.
+#
+# worker/dashboard also get ZEROSHIELD_EVIDENCE_BACKEND=minio here, making
+# MinIO the default evidence store for the containerised platform, while the
+# bare-Python/CI/test default remains local (LocalEvidenceRepository) -
+# see zeroshield.services.experiment_service._default_evidence_repository.
+#
+# web (V2 Phase 4) is the primary ZeroShield UI - a separate Next.js image (apps/web/
+# Dockerfile), never sharing the Python image. It consumes the api service exclusively
+# (API_BASE_URL, plus its own same-origin "/api/*" rewrite for the browser) - never
+# Postgres/MinIO/RabbitMQ/Python directly. Host port 3001, not Next's default 3000,
+# because Grafana already uses 3000 in this same compose file.
+#
+# intelligence-worker (V2 Phase 2) consumes the separate
+# zeroshield.intelligence_syncs queue (zeroshield.worker.intelligence_main) so
+# a slow/large NVD/CISA/EPSS sync never competes with or blocks
+# experiment-run job processing on the `worker` service. Same image, just a
+# different command - not a new microservice. Requires DATABASE_URL (the
+# threat-intelligence system of record is PostgreSQL-backed, not optional).
 
 services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: zeroshield
+      POSTGRES_PASSWORD: zeroshield123
+      POSTGRES_DB: zeroshield
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeroshield -d zeroshield"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
   rabbitmq:
     image: rabbitmq:4-management
     ports:
@@ -71,12 +115,15 @@ services:
       - "8000:8000"
     environment:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_URL: postgresql+psycopg://zeroshield:zeroshield123@postgres:5432/zeroshield
     volumes:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports
       - ./jobs:/app/jobs
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     command: ["python", "-m", "uvicorn", "zeroshield.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
     healthcheck:
@@ -93,22 +140,56 @@ services:
       - "9200:9200"
     environment:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_URL: postgresql+psycopg://zeroshield:zeroshield123@postgres:5432/zeroshield
+      ZEROSHIELD_EVIDENCE_BACKEND: minio
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: zeroshield
+      MINIO_SECRET_KEY: zeroshield123
+      MINIO_SECURE: "false"
     volumes:
       - ./results:/app/results
       - ./jobs:/app/jobs
     depends_on:
       rabbitmq:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     command: ["python", "-m", "zeroshield.worker"]
+
+  intelligence-worker:
+    build: .
+    image: zeroshield:latest
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_URL: postgresql+psycopg://zeroshield:zeroshield123@postgres:5432/zeroshield
+    volumes:
+      - ./experiments:/app/experiments
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "zeroshield.worker.intelligence_main"]
 
   dashboard:
     build: .
     image: zeroshield:latest
     ports:
       - "8502:8501"
+    environment:
+      ZEROSHIELD_EVIDENCE_BACKEND: minio
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: zeroshield
+      MINIO_SECRET_KEY: zeroshield123
+      MINIO_SECURE: "false"
     volumes:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports
+    depends_on:
+      minio:
+        condition: service_healthy
     command: ["python", "-m", "streamlit", "run", "src/zeroshield/dashboard/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
@@ -116,6 +197,21 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  web:
+    build: ./apps/web
+    image: zeroshield-web:latest
+    ports:
+      - "3001:3000"
+    environment:
+      # Server-side base URL (Server Components/Route Handlers, running in Node, reach
+      # the api service directly on the compose network). The browser never talks to
+      # this host:port - it goes through this app's own "/api/*" rewrite instead, so
+      # the API never needs to grant CORS to this origin. See apps/web/next.config.ts.
+      API_BASE_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus
@@ -139,6 +235,7 @@ services:
       - prometheus
 
 volumes:
+  postgres_data:
   minio_data:
   prometheus_data:
   grafana_data:

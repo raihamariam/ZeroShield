@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 
 from zeroshield.models import ApprovalStatus, Decision, ExperimentDefinition, TestCaseCategory
+from zeroshield.models.enums import RunEventType
 from zeroshield.policies import ExecutionContext
+from zeroshield.repositories import LocalEvidenceRepository
 from zeroshield.runners import PolicyRefusalError
 from zeroshield.services import experiment_service as services
 
@@ -79,6 +81,98 @@ def test_run_vpn_experiment_end_to_end_through_real_orchestration(tmp_path: Path
     assert summary.baseline_manifest_path.is_file()
     assert summary.mitigation_manifest_path.is_file()
     assert summary.results_dir == results_root / "ZC-VPN-EXP-001"
+
+
+def test_run_experiment_defaults_to_local_evidence_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No ZEROSHIELD_EVIDENCE_BACKEND set -> local, per V1 compatibility - every
+    existing bare-Python/CI/test invocation has no MinIO server running."""
+    monkeypatch.delenv("ZEROSHIELD_EVIDENCE_BACKEND", raising=False)
+    experiment = _load(VPN_EXPERIMENT_PATH)
+    results_root = tmp_path / "results"
+    summary = services.run_experiment(
+        experiment, execution_context=ExecutionContext.LOCAL_UNIT_TEST, results_root=results_root
+    )
+    assert summary.baseline_manifest_path.is_relative_to(results_root)
+
+
+def test_run_experiment_honours_explicit_evidence_repository_override(tmp_path: Path) -> None:
+    experiment = _load(VPN_EXPERIMENT_PATH)
+    custom_root = tmp_path / "custom_evidence_location"
+    repo = LocalEvidenceRepository(custom_root)
+    summary = services.run_experiment(
+        experiment,
+        execution_context=ExecutionContext.LOCAL_UNIT_TEST,
+        results_root=tmp_path / "unused_results",
+        evidence_repository=repo,
+    )
+    assert summary.baseline_manifest_path.is_relative_to(custom_root)
+    assert not (tmp_path / "unused_results").exists()
+
+
+def test_run_experiment_event_sink_receives_preparing_before_anything_else(tmp_path: Path) -> None:
+    experiment = _load(VPN_EXPERIMENT_PATH)
+    events: list[RunEventType] = []
+    services.run_experiment(
+        experiment,
+        execution_context=ExecutionContext.LOCAL_UNIT_TEST,
+        results_root=tmp_path / "results",
+        event_sink=lambda event_type, detail: events.append(event_type),
+    )
+    assert events[0] == RunEventType.PREPARING
+    assert events[-1] == RunEventType.GENERATING_EVIDENCE
+
+
+def test_run_experiment_event_sink_receives_preparing_even_when_denied(tmp_path: Path) -> None:
+    """PREPARING is emitted before the dataset/strategy checks and before the safety
+    gate - proves it fires unconditionally, not only on a successful run."""
+    experiment = _load(VPN_EXPERIMENT_PATH)
+    events: list[RunEventType] = []
+    with pytest.raises(PolicyRefusalError):
+        services.run_experiment(
+            experiment,
+            execution_context=ExecutionContext.EXPERIMENT_RUN,
+            results_root=tmp_path / "results",
+            event_sink=lambda event_type, detail: events.append(event_type),
+        )
+    assert RunEventType.PREPARING in events
+    assert RunEventType.RUNNING_BASELINE not in events
+
+
+def test_default_evidence_repository_selects_minio_backend_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ZEROSHIELD_EVIDENCE_BACKEND=minio must select MinioEvidenceRepository - the
+    intended default for the containerised platform (docker-compose.yml sets this
+    for worker/dashboard). Fakes MinioEvidenceRepository/default_minio_client so
+    this never needs a live MinIO server."""
+    from zeroshield.repositories import minio_evidence_repository as minio_module
+
+    created: dict[str, object] = {}
+
+    class _FakeMinioRepo:
+        def __init__(self, client: object, bucket: str) -> None:
+            created["client"] = client
+            created["bucket"] = bucket
+
+    monkeypatch.setattr(minio_module, "MinioEvidenceRepository", _FakeMinioRepo)
+    monkeypatch.setattr(minio_module, "default_minio_client", lambda: "fake-client")
+    monkeypatch.setenv("ZEROSHIELD_EVIDENCE_BACKEND", "minio")
+    monkeypatch.setenv("MINIO_EVIDENCE_BUCKET", "custom-bucket")
+
+    repo = services._default_evidence_repository(tmp_path / "results")
+    assert isinstance(repo, _FakeMinioRepo)
+    assert created == {"client": "fake-client", "bucket": "custom-bucket"}
+
+
+def test_default_evidence_repository_defaults_to_local_bucket_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MINIO_EVIDENCE_BUCKET", raising=False)
+    monkeypatch.delenv("ZEROSHIELD_EVIDENCE_BACKEND", raising=False)
+    repo = services._default_evidence_repository(tmp_path / "results")
+    assert isinstance(repo, LocalEvidenceRepository)
 
 
 def test_run_telecom_experiment_end_to_end_through_real_orchestration(tmp_path: Path) -> None:

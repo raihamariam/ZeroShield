@@ -10,6 +10,7 @@ box in the ZeroShield architecture.
 """
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,14 +29,39 @@ from zeroshield.models import (
     TestCase,
     TestCaseCategory,
 )
+from zeroshield.models.enums import RunEventType
 from zeroshield.orchestration import execute_and_generate_evidence
 from zeroshield.policies import ExecutionContext, SafetyPolicy
-from zeroshield.repositories import LocalEvidenceRepository
+from zeroshield.repositories import EvidenceRepository, LocalEvidenceRepository
+from zeroshield.runners import EventSink
 from zeroshield.strategies.registry import UnknownStrategyError, resolve_strategy
 
 
 class ExperimentServiceError(Exception):
     """Raised for any service-layer failure that isn't already a core exception."""
+
+
+def _default_evidence_repository(results_root: Path) -> EvidenceRepository:
+    """Selects the evidence backend via ZEROSHIELD_EVIDENCE_BACKEND ("local",
+    the default, or "minio"). MinIO is the intended primary evidence store
+    for the containerised platform (docker-compose.yml sets this env var for
+    the worker/dashboard services) - local remains the default here so every
+    existing bare-Python/CI/test invocation, which has no MinIO server
+    running, keeps working unchanged, per V1 compatibility. The minio import
+    is local/guarded so the "storage" extra stays optional for callers that
+    never select it, consistent with zeroshield.repositories.__init__'s
+    stated policy.
+    """
+    backend = os.environ.get("ZEROSHIELD_EVIDENCE_BACKEND", "local").strip().lower()
+    if backend == "minio":
+        from zeroshield.repositories.minio_evidence_repository import (
+            MinioEvidenceRepository,
+            default_minio_client,
+        )
+
+        bucket = os.environ.get("MINIO_EVIDENCE_BUCKET", "zeroshield-evidence")
+        return MinioEvidenceRepository(default_minio_client(), bucket)
+    return LocalEvidenceRepository(results_root)
 
 
 def list_experiments(experiments_dir: Path) -> ExperimentDiscoveryResult:
@@ -71,13 +97,24 @@ def run_experiment(
     execution_context: ExecutionContext,
     results_root: Path,
     git_commit: str = "0000000",
+    evidence_repository: EvidenceRepository | None = None,
+    event_sink: EventSink | None = None,
 ) -> RunOutcomeSummary:
     """Run baseline+mitigation and persist evidence via the existing orchestration layer.
 
     Raises ExperimentServiceError for dataset/strategy resolution problems, and lets
     zeroshield.runners.PolicyRefusalError propagate unchanged - the safety
     gate inside ExperimentRunner.run() is never bypassed here.
+
+    evidence_repository defaults to _default_evidence_repository(results_root)
+    (local, unless ZEROSHIELD_EVIDENCE_BACKEND=minio) - pass an explicit
+    instance to override. event_sink, if given, is called with each
+    RunEventType the underlying runner/orchestration actually reaches, in
+    real execution order (see zeroshield.runners.experiment_runner.EventSink).
     """
+    if event_sink is not None:
+        event_sink(RunEventType.PREPARING, None)
+
     dataset_path = Path.cwd() / experiment.dataset_path
     if not dataset_path.is_file():
         raise ExperimentServiceError(f"dataset not found: {dataset_path}")
@@ -92,7 +129,7 @@ def run_experiment(
     baseline_run_id = f"RUN-{stamp}01"
     mitigation_run_id = f"RUN-{stamp}02"
 
-    repo = LocalEvidenceRepository(results_root)
+    repo = evidence_repository or _default_evidence_repository(results_root)
     result = execute_and_generate_evidence(
         experiment,
         dataset_path,
@@ -103,6 +140,7 @@ def run_experiment(
         git_commit=git_commit,
         evidence_repository=repo,
         execution_context=execution_context,
+        event_sink=event_sink,
     )
     return RunOutcomeSummary(
         comparison_report=result.comparison_report,

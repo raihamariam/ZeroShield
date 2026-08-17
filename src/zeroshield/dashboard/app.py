@@ -1,4 +1,4 @@
-"""ZeroShield Demo Dashboard (Milestone 18).
+"""ZeroShield Demo Dashboard (Milestone 18) - LEGACY, read-only (V2 Phase 4, Step 11).
 
 A Streamlit presentation/demonstration layer over the existing ZeroShield
 Core. This module only renders UI and calls zeroshield.services.experiment_service,
@@ -8,6 +8,15 @@ or metric logic is implemented here - the existing core remains the source
 of truth. Launch from the repository root:
 
     streamlit run src/zeroshield/dashboard/app.py
+
+As of Phase 4, the apps/web Next.js application is the primary ZeroShield
+interface. This dashboard's run-execution path (render_safety_and_run) has
+been deliberately disabled: it used to call services.run_experiment()
+in-process, entirely outside the async job queue / Experiment Studio
+approval workflow the web app now enforces, which would let it bypass that
+governance. Everything else here remains a legitimate, safety-inert,
+read-only view (browsing experiments, results, test cases, evidence,
+generating the Overleaf export) and is left enabled.
 """
 
 from pathlib import Path
@@ -17,7 +26,6 @@ import streamlit as st
 from zeroshield.models import ComparisonReport, Domain, ExperimentDefinition
 from zeroshield.policies import ExecutionContext
 from zeroshield.repositories import verify_manifest_integrity
-from zeroshield.runners import PolicyRefusalError
 from zeroshield.services import experiment_service as services
 
 REPO_ROOT = Path.cwd()
@@ -127,36 +135,11 @@ def render_safety_and_run(experiment: ExperimentDefinition) -> None:
             st.markdown(f"- {reason}")
 
     st.markdown("#### Run experiment")
-    run_clicked = st.button(
-        "Run Experiment", disabled=not check.decision.allowed, key=f"run_{experiment.experiment_id}"
+    st.info(
+        "Run execution has moved to the ZeroShield web application (Experiment Studio / Experiments), so every "
+        "run goes through the same approval-gated, queued path and can't bypass it from here. This dashboard is "
+        "read-only for run submission - browse existing results/evidence below instead."
     )
-    if run_clicked:
-        with st.status("Running experiment pipeline...", expanded=True) as status:
-            st.write("1. Loading experiment")
-            st.write("2. Safety validation")
-            st.write("3. Loading synthetic dataset")
-            st.write("4. Running baseline")
-            st.write("5. Running mitigation")
-            st.write("6. Calculating metrics")
-            st.write("7. Generating evidence")
-            try:
-                summary = services.run_experiment(
-                    experiment, execution_context=context_label, results_root=RESULTS_ROOT
-                )
-            except PolicyRefusalError as exc:
-                status.update(label="Refused by safety policy", state="error")
-                st.error("Execution was refused before any case was processed:")
-                for reason in exc.decision.reasons:
-                    st.markdown(f"- {reason}")
-            except services.ExperimentServiceError as exc:
-                status.update(label="Failed", state="error")
-                st.error(str(exc))
-            else:
-                status.update(label="Complete", state="complete")
-                st.success(
-                    f"Run complete: {summary.comparison_report.total_cases} cases. "
-                    f"Evidence written to `{summary.results_dir}`."
-                )
 
 
 def render_results(comparison: ComparisonReport, case_comparisons: list[services.CaseComparison]) -> None:
@@ -323,9 +306,15 @@ def render_research_pipeline() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="ZeroShield Dashboard", page_icon="🛡️", layout="wide")
+    st.set_page_config(page_title="ZeroShield Dashboard (Legacy)", page_icon="🛡️", layout="wide")
+    st.warning(
+        "**Legacy, read-only dashboard.** The ZeroShield web application is now the primary interface - use it "
+        "for Experiment Studio, approvals, live runs, and evidence. This page can browse existing "
+        "experiments/results/evidence but can no longer submit a run, so it can't bypass the web app's "
+        "approval-gated workflow."
+    )
 
-    st.sidebar.title("🛡️ ZeroShield")
+    st.sidebar.title("🛡️ ZeroShield (Legacy)")
     discovery = services.list_experiments(EXPERIMENTS_DIR)
     if discovery.skipped:
         with st.sidebar.expander(f"{len(discovery.skipped)} file(s) skipped"):

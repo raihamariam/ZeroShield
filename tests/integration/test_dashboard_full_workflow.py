@@ -1,9 +1,16 @@
-"""End-to-end dashboard workflow via Streamlit's real AppTest rendering: select
-experiment -> check safety -> run -> Results -> Test Cases -> Evidence ->
-Overleaf Export. Extends the lighter smoke test in tests/unit/dashboard/
-test_app_smoke.py (which only confirms a run completes) to touch every tab
-with real, persisted evidence - proving the full user-facing workflow works,
-not just that individual pieces are wired correctly.
+"""End-to-end dashboard READ-ONLY workflow via Streamlit's real AppTest
+rendering: select experiment -> Results -> Test Cases -> Evidence -> Overleaf
+Export, for an experiment that already has persisted evidence on disk.
+
+As of V2 Phase 4 (see zeroshield.dashboard.app's module docstring),
+render_safety_and_run no longer executes anything in-process - run submission
+moved to the web app's approval-gated path. This test therefore seeds real
+evidence directly through zeroshield.services.experiment_service.run_experiment
+(the same call path the worker/CLI use, entirely outside the dashboard UI),
+then drives the dashboard purely as a read-only viewer over that evidence -
+proving the full read-only workflow works, not just that individual pieces
+are wired correctly. tests/unit/dashboard/test_app_smoke.py is the lighter
+smoke test that also asserts the run-submission UI stays disabled.
 
 Happy path only: denial/failure-path scenarios are Milestone 26's scope.
 """
@@ -12,8 +19,14 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+from zeroshield.experiments import find_experiment
+from zeroshield.policies import ExecutionContext
+from zeroshield.services import experiment_service
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_PATH = REPO_ROOT / "src" / "zeroshield" / "dashboard" / "app.py"
+EXPERIMENTS_DIR = REPO_ROOT / "experiments"
+RESULTS_ROOT = REPO_ROOT / "results"
 
 # app.py resolves results/experiments from Path.cwd() (the documented "launch from
 # the repository root" convention); pytest is always run from the repository root
@@ -22,21 +35,24 @@ APP_PATH = REPO_ROOT / "src" / "zeroshield" / "dashboard" / "app.py"
 # other real dashboard/CLI/API run performed throughout this project's milestones.
 
 
+def _seed_evidence(experiment_id: str) -> None:
+    experiment = find_experiment(EXPERIMENTS_DIR, experiment_id)
+    assert experiment is not None
+    experiment_service.run_experiment(
+        experiment, execution_context=ExecutionContext.LOCAL_UNIT_TEST, results_root=RESULTS_ROOT
+    )
+
+
 def test_full_dashboard_workflow_vpn() -> None:
+    _seed_evidence("ZC-VPN-EXP-001")
+
     at = AppTest.from_file(str(APP_PATH))
     at.run(timeout=30)
 
     labels = at.sidebar.selectbox[0].options
     vpn_index = next(i for i, label in enumerate(labels) if label.startswith("ZC-VPN-EXP-001"))
     at.sidebar.selectbox[0].set_value(vpn_index).run(timeout=30)
-
-    radio = at.tabs[1].radio[0]
-    at.tabs[1].radio[0].set_value(radio.options[1]).run(timeout=30)  # local_unit_test
-
-    at.button(key="run_ZC-VPN-EXP-001").click().run(timeout=30)
     assert not at.exception
-    success_messages = " ".join(m.value for m in at.tabs[1].success)
-    assert "Run complete: 22 cases" in success_messages
 
     # Results tab
     results_markdown = " ".join(m.value for m in at.tabs[2].markdown)
@@ -78,20 +94,15 @@ def test_full_dashboard_workflow_vpn() -> None:
 
 
 def test_full_dashboard_workflow_telecom() -> None:
+    _seed_evidence("ZC-TELECOM-EXP-001")
+
     at = AppTest.from_file(str(APP_PATH))
     at.run(timeout=30)
 
     labels = at.sidebar.selectbox[0].options
     telecom_index = next(i for i, label in enumerate(labels) if label.startswith("ZC-TELECOM-EXP-001"))
     at.sidebar.selectbox[0].set_value(telecom_index).run(timeout=30)
-
-    radio = at.tabs[1].radio[0]
-    at.tabs[1].radio[0].set_value(radio.options[1]).run(timeout=30)  # local_unit_test
-
-    at.button(key="run_ZC-TELECOM-EXP-001").click().run(timeout=30)
     assert not at.exception
-    success_messages = " ".join(m.value for m in at.tabs[1].success)
-    assert "Run complete: 25 cases" in success_messages
 
     assert len(at.tabs[3].selectbox[0].options) == 25
 

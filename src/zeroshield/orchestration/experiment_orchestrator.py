@@ -6,9 +6,10 @@ from pathlib import Path
 from zeroshield.datasets import load_test_set
 from zeroshield.metrics import calculate_metrics, compare
 from zeroshield.models import ComparisonReport, ExperimentDefinition
+from zeroshield.models.enums import RunEventType
 from zeroshield.policies import ExecutionContext
 from zeroshield.repositories import EvidenceRepository, build_run_evidence
-from zeroshield.runners import ExperimentExecutionResult, ExperimentRunner
+from zeroshield.runners import EventSink, ExperimentExecutionResult, ExperimentRunner
 from zeroshield.strategies import ProcessingStrategy
 
 
@@ -39,6 +40,7 @@ def execute_and_generate_evidence(
     execution_context: ExecutionContext = ExecutionContext.EXPERIMENT_RUN,
     environment: dict[str, str] | None = None,
     clock: Callable[[], datetime] = _utc_now,
+    event_sink: EventSink | None = None,
 ) -> ValidationResult:
     """Run baseline+mitigation, compute metrics/comparison, and persist evidence for both runs."""
     runner = runner or ExperimentRunner()
@@ -55,8 +57,11 @@ def execute_and_generate_evidence(
         environment=environment,
         execution_context=execution_context,
         clock=clock,
+        event_sink=event_sink,
     )
 
+    if event_sink is not None:
+        event_sink(RunEventType.ANALYSING, None)
     baseline_metrics = calculate_metrics(
         baseline_run_id, result.baseline.case_results, test_set.cases, clock=clock
     )
@@ -79,6 +84,8 @@ def execute_and_generate_evidence(
         clock=clock,
     )
 
+    if event_sink is not None:
+        event_sink(RunEventType.GENERATING_EVIDENCE, None)
     baseline_dir = evidence_repository.save_run_evidence(baseline_bundle)
     mitigation_dir = evidence_repository.save_run_evidence(mitigation_bundle)
     comparison_path = evidence_repository.save_comparison(experiment.experiment_id, report)

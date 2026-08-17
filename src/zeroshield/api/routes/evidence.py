@@ -8,10 +8,13 @@ see zeroshield.api.dependencies), so there is no arbitrary filesystem access
 here.
 """
 
+import io
+import zipfile
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from zeroshield.api.dependencies import get_experiment, get_results_root
 from zeroshield.api.schemas import (
@@ -100,4 +103,43 @@ def get_evidence(
         evidence_location=str(view.results_dir),
         baseline=_manifest_summary(view.baseline_manifest),
         mitigation=_manifest_summary(view.mitigation_manifest),
+    )
+
+
+@router.get(
+    "/experiments/{experiment_id}/evidence/bundle",
+    summary="Download the evidence bundle for the latest run (zip)",
+    description="Streams a zip of comparison.json plus both baseline and mitigation run "
+    "directories (manifest.json and artefacts) - exactly the files already summarised by "
+    "GET .../evidence, nothing more. Run directories come from the already-loaded, trusted "
+    "EvidenceManifest records (never a client-supplied path), so this cannot be used for "
+    "arbitrary filesystem access. Never exposes MinIO admin credentials - evidence is read "
+    "through the same local results_root every other evidence route uses. 404 if never run.",
+)
+def download_evidence_bundle(
+    experiment: Annotated[ExperimentDefinition, Depends(get_experiment)],
+    results_root: Annotated[Path, Depends(get_results_root)],
+) -> StreamingResponse:
+    view = _load_view(experiment, results_root)
+    experiment_dir = results_root / experiment.experiment_id
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        comparison_path = experiment_dir / "comparison.json"
+        if comparison_path.is_file():
+            zf.write(comparison_path, arcname="comparison.json")
+        for manifest in (view.baseline_manifest, view.mitigation_manifest):
+            run_dir = experiment_dir / manifest.run_id
+            if not run_dir.is_dir():
+                continue
+            for artefact_path in sorted(run_dir.iterdir()):
+                if artefact_path.is_file():
+                    zf.write(artefact_path, arcname=f"{manifest.run_id}/{artefact_path.name}")
+    buffer.seek(0)
+
+    filename = f"{experiment.experiment_id}-evidence.zip"
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

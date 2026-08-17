@@ -86,3 +86,19 @@ class JobStore:
         if not path.is_file():
             return None
         return JobRecord.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def list_all(self) -> list[JobRecord]:
+        """Every job record on disk, most-recently-submitted first - powers
+        Mission Control/Runs list pages (V2 Phase 4). Corrupt/unreadable
+        files are skipped rather than raised, since this is a best-effort
+        listing over a directory of independently-written files, not a
+        single authoritative read."""
+        if not self._jobs_dir.is_dir():
+            return []
+        records: list[JobRecord] = []
+        for path in self._jobs_dir.glob("*.json"):
+            try:
+                records.append(JobRecord.model_validate_json(path.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+        return sorted(records, key=lambda r: r.submitted_at, reverse=True)

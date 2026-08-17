@@ -6,9 +6,14 @@ full submit-then-process round trip (test_jobs_integration.py), not here.
 """
 
 from pathlib import Path
+from typing import Any
 
 from fastapi.testclient import TestClient
 
+from zeroshield.api import dependencies
+from zeroshield.api.app import app
+from zeroshield.models.enums import RunEventType
+from zeroshield.repositories import RunEvent, RunRepository
 from zeroshield.services.job_store import RunJobMessage
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -104,3 +109,71 @@ def test_submit_run_rejects_unexpected_fields(client: TestClient) -> None:
         },
     )
     assert response.status_code == 422
+
+
+class _RecordingRunRepository(RunRepository):
+    def __init__(self) -> None:
+        self.events: list[RunEvent] = []
+
+    def record_event(
+        self,
+        run_id: str,
+        experiment_id: str,
+        event_type: RunEventType,
+        *,
+        execution_context: str | None = None,
+        detail: dict[str, Any] | None = None,
+        clock: Any = None,
+    ) -> RunEvent:
+        from datetime import UTC, datetime
+
+        event = RunEvent(
+            run_id=run_id,
+            experiment_id=experiment_id,
+            event_type=event_type,
+            occurred_at=datetime.now(UTC),
+            detail=detail,
+        )
+        self.events.append(event)
+        return event
+
+    def list_events(self, run_id: str) -> list[RunEvent]:
+        return [e for e in self.events if e.run_id == run_id]
+
+
+class _RaisingRunRepository(RunRepository):
+    def record_event(self, *args: Any, **kwargs: Any) -> RunEvent:
+        raise ConnectionError("simulated database outage")
+
+    def list_events(self, run_id: str) -> list[RunEvent]:
+        raise ConnectionError("simulated database outage")
+
+
+def test_submit_run_records_queued_event_when_run_repository_configured(
+    client: TestClient,
+) -> None:
+    run_repository = _RecordingRunRepository()
+    app.dependency_overrides[dependencies.get_run_repository] = lambda: run_repository
+    try:
+        response = client.post(
+            "/experiments/ZC-VPN-EXP-001/runs", json={"execution_context": "local_unit_test"}
+        )
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        assert [e.event_type for e in run_repository.list_events(job_id)] == [RunEventType.QUEUED]
+    finally:
+        del app.dependency_overrides[dependencies.get_run_repository]
+
+
+def test_submit_run_still_succeeds_when_run_repository_is_unreachable(client: TestClient) -> None:
+    """A Postgres outage must never block job submission - QUEUED-event recording
+    is best-effort auxiliary observability, not a precondition for queuing."""
+    app.dependency_overrides[dependencies.get_run_repository] = lambda: _RaisingRunRepository()
+    try:
+        response = client.post(
+            "/experiments/ZC-VPN-EXP-001/runs", json={"execution_context": "local_unit_test"}
+        )
+        assert response.status_code == 202
+        assert response.json()["status"] == "queued"
+    finally:
+        del app.dependency_overrides[dependencies.get_run_repository]

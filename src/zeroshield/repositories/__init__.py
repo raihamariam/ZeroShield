@@ -8,20 +8,25 @@ from zeroshield.repositories.evidence_repository import (
     EvidenceRepository,
     LocalEvidenceRepository,
 )
+from zeroshield.repositories.run_repository import NullRunRepository, RunEvent, RunRepository
 
-# MinioEvidenceRepository is deliberately NOT imported here: it requires the
-# optional 'minio' package (the "storage" extra), and every existing consumer
-# of this package (CLI, dashboard, API, worker) only installs "api"/
-# "dashboard"/"queue"/"dev" - eagerly importing it here would make minio a
-# hard dependency for all of them. Import it directly from
-# zeroshield.repositories.minio_evidence_repository when the storage extra is
-# installed and MinIO is actually wanted.
+# MinioEvidenceRepository/PostgresRunRepository are deliberately NOT imported
+# here: they require the optional 'minio'/'db' packages (the "storage"/"db"
+# extras), and every existing consumer of this package (CLI, dashboard, API,
+# worker) only installs "api"/"dashboard"/"queue"/"dev" - eagerly importing
+# them here would make minio/sqlalchemy hard dependencies for all of them.
+# Import zeroshield.repositories.minio_evidence_repository /
+# zeroshield.repositories.postgres_run_repository directly when the
+# storage/db extra is installed and actually wanted.
 
 __all__ = [
     "EvidenceAlreadyExistsError",
     "EvidenceBundle",
     "EvidenceRepository",
     "LocalEvidenceRepository",
+    "NullRunRepository",
+    "RunEvent",
+    "RunRepository",
     "build_run_evidence",
     "verify_manifest_integrity",
 ]

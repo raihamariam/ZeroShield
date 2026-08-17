@@ -16,8 +16,11 @@ from zeroshield.models import (
     RunStatus,
     TestCase,
 )
+from zeroshield.models.enums import RunEventType
 from zeroshield.policies import ExecutionContext, SafetyPolicy
 from zeroshield.strategies import ProcessingStrategy
+
+EventSink = Callable[[RunEventType, dict[str, object] | None], None]
 
 
 class PolicyRefusalError(Exception):
@@ -69,7 +72,10 @@ class ExperimentRunner:
         environment: dict[str, str] | None = None,
         execution_context: ExecutionContext = ExecutionContext.EXPERIMENT_RUN,
         clock: Callable[[], datetime] = _utc_now,
+        event_sink: EventSink | None = None,
     ) -> ExperimentExecutionResult:
+        if event_sink is not None:
+            event_sink(RunEventType.SAFETY_CHECK, None)
         decision = self._safety_policy.evaluate(
             experiment, execution_context=execution_context, clock=clock
         )
@@ -96,6 +102,8 @@ class ExperimentRunner:
 
         env = environment or _default_environment()
 
+        if event_sink is not None:
+            event_sink(RunEventType.RUNNING_BASELINE, None)
         baseline_outcome = self._execute_mode(
             strategy=baseline,
             cases=test_set.cases,
@@ -107,6 +115,8 @@ class ExperimentRunner:
             environment=env,
             clock=clock,
         )
+        if event_sink is not None:
+            event_sink(RunEventType.RUNNING_MITIGATION, None)
         mitigation_outcome = self._execute_mode(
             strategy=mitigation,
             cases=test_set.cases,

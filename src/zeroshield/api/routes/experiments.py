@@ -8,6 +8,7 @@ RabbitMQ worker (zeroshield.worker.processor) when that job actually runs,
 never here.
 """
 
+import logging
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ from zeroshield.api.dependencies import (
     get_experiments_dir,
     get_job_store,
     get_publisher,
+    get_run_repository,
 )
 from zeroshield.api.schemas import (
     CVESummary,
@@ -32,9 +34,13 @@ from zeroshield.api.schemas import (
     ValidationResponse,
 )
 from zeroshield.models import ExperimentDefinition
+from zeroshield.models.enums import RunEventType
 from zeroshield.observability.metrics import EXPERIMENT_RUNS_SUBMITTED_TOTAL
+from zeroshield.repositories import RunRepository
 from zeroshield.services import experiment_service
 from zeroshield.services.job_store import JobRecord, JobStatus, JobStore, RunJobMessage
+
+logger = logging.getLogger("zeroshield.api")
 
 router = APIRouter(tags=["experiments"])
 
@@ -134,6 +140,7 @@ def submit_run(
     request: ExecutionContextRequest,
     job_store: Annotated[JobStore, Depends(get_job_store)],
     publish: Annotated[Callable[[RunJobMessage], None], Depends(get_publisher)],
+    run_repository: Annotated[RunRepository, Depends(get_run_repository)],
 ) -> JobSubmittedResponse:
     job_id = f"JOB-{uuid.uuid4().hex}"
     now = datetime.now(UTC)
@@ -157,6 +164,18 @@ def submit_run(
     EXPERIMENT_RUNS_SUBMITTED_TOTAL.labels(
         experiment_id=experiment.experiment_id, execution_context=request.execution_context.value
     ).inc()
+    # Best-effort: the rich RunEvent trail is auxiliary observability, never
+    # a safety authority or a precondition for the job itself - a Postgres
+    # hiccup here must never prevent a valid job from being queued.
+    try:
+        run_repository.record_event(
+            job_id,
+            experiment.experiment_id,
+            RunEventType.QUEUED,
+            execution_context=request.execution_context.value,
+        )
+    except Exception:
+        logger.warning("failed to record QUEUED run event for job %s", job_id, exc_info=True)
     return JobSubmittedResponse(
         job_id=job_id, experiment_id=experiment.experiment_id, status=JobStatus.QUEUED.value
     )

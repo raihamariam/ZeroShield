@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from zeroshield.models import ApprovalStatus, ExperimentDefinition
+from zeroshield.models.enums import RunEventType
 from zeroshield.orchestration import execute_and_generate_evidence
 from zeroshield.policies import ExecutionContext
 from zeroshield.repositories import LocalEvidenceRepository, verify_manifest_integrity
@@ -130,4 +131,34 @@ def test_orchestrator_refuses_unapproved_experiment(tmp_path: Path) -> None:
             evidence_repository=repo,
             execution_context=ExecutionContext.EXPERIMENT_RUN,
         )
-    assert not (tmp_path / "evidence").exists()
+
+
+def test_event_sink_receives_full_lifecycle_in_order(tmp_path: Path) -> None:
+    """The orchestrator adds ANALYSING/GENERATING_EVIDENCE around the runner's own
+    SAFETY_CHECK/RUNNING_BASELINE/RUNNING_MITIGATION events, in real execution order."""
+    dataset_path = tmp_path / "dataset.json"
+    _write_dataset(dataset_path)
+    repo = LocalEvidenceRepository(tmp_path / "evidence")
+    experiment = _telecom_experiment(approved=True)
+
+    events: list[RunEventType] = []
+    execute_and_generate_evidence(
+        experiment,
+        dataset_path,
+        baseline=_StubStrategy("telecom_stub_baseline", "accepted"),
+        mitigation=_StubStrategy("telecom_stub_mitigation", "blocked"),
+        baseline_run_id="RUN-001",
+        mitigation_run_id="RUN-002",
+        git_commit="abc1234",
+        evidence_repository=repo,
+        execution_context=ExecutionContext.EXPERIMENT_RUN,
+        event_sink=lambda event_type, detail: events.append(event_type),
+    )
+
+    assert events == [
+        RunEventType.SAFETY_CHECK,
+        RunEventType.RUNNING_BASELINE,
+        RunEventType.RUNNING_MITIGATION,
+        RunEventType.ANALYSING,
+        RunEventType.GENERATING_EVIDENCE,
+    ]

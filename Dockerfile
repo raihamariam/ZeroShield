@@ -13,6 +13,14 @@
 # docker-compose.yml so evidence and job records persist on the host,
 # consistent with how the rest of the project treats them (.gitignore
 # excludes their contents for the same reason).
+#
+# "storage" (minio) and "db" (sqlalchemy/alembic/psycopg) are included
+# because docker-compose.yml's worker/dashboard services set
+# ZEROSHIELD_EVIDENCE_BACKEND=minio and api/worker set DATABASE_URL by
+# default (V2 Platform Foundation phase) - both are still optional at
+# runtime (unset either env var and the image falls back to local evidence /
+# NullRunRepository), but the packages must be present for the opt-in path
+# to work inside a container.
 
 FROM python:3.12-slim
 
@@ -23,7 +31,7 @@ COPY src ./src
 COPY experiments ./experiments
 COPY test_data ./test_data
 
-RUN pip install --no-cache-dir ".[api,dashboard,queue]"
+RUN pip install --no-cache-dir ".[api,dashboard,queue,storage,db,intelligence,excel]"
 
 RUN mkdir -p results overleaf_exports jobs
 

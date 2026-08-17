@@ -24,7 +24,19 @@ from fastapi import FastAPI
 
 from zeroshield.api.errors import register_exception_handlers
 from zeroshield.api.observability import PrometheusMiddleware
-from zeroshield.api.routes import evidence, experiments, health, jobs, metrics
+from zeroshield.api.routes import (
+    analyst,
+    assets,
+    controls,
+    evidence,
+    experiments,
+    health,
+    intelligence,
+    jobs,
+    metrics,
+    revalidation,
+    studio,
+)
 
 app = FastAPI(
     title="ZeroShield API",
@@ -45,3 +57,9 @@ app.include_router(experiments.router)
 app.include_router(evidence.router)
 app.include_router(jobs.router)
 app.include_router(metrics.router)
+app.include_router(intelligence.router)
+app.include_router(studio.router)
+app.include_router(analyst.router)
+app.include_router(assets.router)
+app.include_router(controls.router)
+app.include_router(revalidation.router)

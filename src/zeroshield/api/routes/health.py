@@ -54,9 +54,9 @@ def _check_database() -> DependencyHealthResponse:
     try:
         from sqlalchemy import text
 
-        from zeroshield.db.session import build_sessionmaker
+        from zeroshield.db.session import get_shared_sessionmaker
 
-        sessionmaker = build_sessionmaker()
+        sessionmaker = get_shared_sessionmaker()
         with sessionmaker() as session:
             session.execute(text("SELECT 1"))
         return DependencyHealthResponse(name="database", available=True, detail=None, checked_at=checked_at)

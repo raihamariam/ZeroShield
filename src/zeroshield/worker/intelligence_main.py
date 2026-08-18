@@ -19,7 +19,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-import pika
 from opentelemetry import trace
 from prometheus_client import start_http_server
 from pydantic import ValidationError
@@ -34,6 +33,7 @@ from zeroshield.intelligence.repository import VulnerabilityRepository
 from zeroshield.intelligence.sync_service import run_sync
 from zeroshield.observability.logging import configure_json_logging
 from zeroshield.observability.tracing import configure_tracing, extract_trace_context, get_tracer
+from zeroshield.worker.broker import connect_with_retry
 
 _tracer = get_tracer("zeroshield.worker.intelligence")
 
@@ -113,7 +113,7 @@ def main() -> None:  # pragma: no cover - requires a live RabbitMQ+Postgres; see
     start_http_server(metrics_port)
     logger.info("intelligence worker Prometheus metrics available on :%d/metrics", metrics_port)
 
-    connection = pika.BlockingConnection(pika.URLParameters(get_rabbitmq_url()))
+    connection = connect_with_retry(get_rabbitmq_url())
     channel = connection.channel()
     channel.queue_declare(queue=INTELLIGENCE_SYNC_QUEUE_NAME, durable=True)
     channel.basic_qos(prefetch_count=1)

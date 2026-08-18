@@ -16,10 +16,29 @@
 #
 # MinIO (Milestone 22) is an available, alternative EvidenceRepository
 # backend - see zeroshield.repositories.MinioEvidenceRepository - not the
-# default the api/worker services use (they still use the local filesystem).
-# It is included here so it can be exercised manually; its ports are on
-# alternates (9002/9003) to avoid clashing with any other MinIO already
-# using the default 9000/9001 on this machine.
+# default any service here uses (all use ZEROSHIELD_EVIDENCE_BACKEND's
+# code-level default, "local"). It is included here so it can be exercised
+# manually; its ports are on alternates (9002/9003) to avoid clashing with
+# any other MinIO already using the default 9000/9001 on this machine.
+#
+# It is NOT set as the default for worker/dashboard (final release
+# verification pass reverted an earlier docker-compose.yml that did) because
+# of a real, confirmed gap this audit found: zeroshield.services.
+# experiment_service.load_latest_evidence() - the one function GET
+# /experiments/{id}/verdict, /results, and /evidence, plus the dashboard,
+# all read through - is hardcoded to LocalEvidenceRepository regardless of
+# ZEROSHIELD_EVIDENCE_BACKEND. MinioEvidenceRepository itself writes evidence
+# correctly (confirmed by inspecting the MinIO bucket directly after a real
+# run), but with worker on "minio" and api on its "local" default, every
+# run's evidence became genuinely invisible through every API/UI read path -
+# 404 "no_evidence" despite a real, completed, integrity-verifiable run.
+# Fixing load_latest_evidence to be backend-aware is real follow-up work,
+# out of scope for this pass (no redesign of working code) - see
+# docs/DEPLOYMENT.md's final release verification report and
+# docs/FUTURE_OPPORTUNITIES.md. Until then, every service reading evidence
+# through the API/dashboard must agree with whichever backend the worker
+# that produced it used - api/worker/dashboard here all use "local" so they
+# always agree.
 #
 # Prometheus/Grafana (Milestone 23) scrape ONLY operational metrics (request
 # counts/latency, job outcome counts/durations) from api:8000/metrics and
@@ -59,6 +78,44 @@
 # experiment-run job processing on the `worker` service. Same image, just a
 # different command - not a new microservice. Requires DATABASE_URL (the
 # threat-intelligence system of record is PostgreSQL-backed, not optional).
+#
+# ./experiments:/app/experiments is bind-mounted on api/worker/dashboard
+# (final release verification fix) - previously only intelligence-worker had
+# it, each other service instead relying on the Dockerfile's build-time
+# `COPY experiments ./experiments`, meaning each container had its own
+# frozen, container-local copy with no visibility into what any other
+# container wrote there. This was a real, reproduced bug: POST
+# /experiment-versions/{id}/runs calls materialise_to_experiments_dir() on
+# the api container, writing the approved experiment's JSON into api's own
+# isolated /app/experiments/ - which worker's find_experiment() could never
+# see, since worker had a *different* isolated /app/experiments/ containing
+# only the two originally-baked-in bundled experiments. Every Studio-based
+# run failed with "experiment could not be found when the job started" in
+# the Dockerized deployment (the bare-Python/non-Docker path was unaffected,
+# since there is only one process and one filesystem there). Now all three
+# share the host's real experiments/ directory, exactly like
+# intelligence-worker already did.
+#
+# ./test_data:/app/test_data is bind-mounted for the same reason, on the
+# same three services - zeroshield.studio.builder writes each generated
+# dataset to test_data/generated/<generator_id>/<sha256>.json (api
+# container), and zeroshield.datasets.loader.load_test_set reads that same
+# relative path (worker container) when a run actually executes. Without
+# this mount, every Studio-submitted run failed with "the experiment's
+# configured dataset ... could not be resolved on this server" - the exact
+# same class of bug as the experiments/ one above, just one directory over.
+#
+# migrate (final release verification fix) is a one-shot service - same
+# image, `alembic upgrade head`, then exits 0 - that runs once postgres is
+# healthy and before api/worker/intelligence-worker start
+# (depends_on: migrate: condition: service_completed_successfully). This is
+# the only thing that actually applies the schema on a fresh `postgres_data`
+# volume; without it, `docker compose up` on an empty volume would start the
+# API against a database with no tables at all, and every DB-backed feature
+# - including login, since auth is DB-backed from V2 Phase 6 - would fail at
+# first use instead of never starting. Never Base.metadata.create_all() -
+# Alembic is the single source of truth for schema, same as running it by
+# hand outside Docker (see docs/HANDOVER.md).
 
 services:
   postgres:
@@ -108,6 +165,17 @@ services:
       start_period: 20s
       retries: 5
 
+  migrate:
+    build: .
+    image: zeroshield:latest
+    environment:
+      DATABASE_URL: postgresql+psycopg://zeroshield:${POSTGRES_PASSWORD:-zeroshield123}@postgres:5432/zeroshield
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: "no"
+
   api:
     build: .
     image: zeroshield:latest
@@ -120,11 +188,15 @@ services:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports
       - ./jobs:/app/jobs
+      - ./experiments:/app/experiments
+      - ./test_data:/app/test_data
     depends_on:
       rabbitmq:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: ["python", "-m", "uvicorn", "zeroshield.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
@@ -141,14 +213,14 @@ services:
     environment:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       DATABASE_URL: postgresql+psycopg://zeroshield:${POSTGRES_PASSWORD:-zeroshield123}@postgres:5432/zeroshield
-      ZEROSHIELD_EVIDENCE_BACKEND: minio
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: zeroshield
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-zeroshield123}
-      MINIO_SECURE: "false"
+      # Deliberately local, matching `api` below (final release verification fix) - see
+      # the top-of-file comment on ZEROSHIELD_EVIDENCE_BACKEND for why MinIO is not the
+      # default here despite the minio service being started either way.
     volumes:
       - ./results:/app/results
       - ./jobs:/app/jobs
+      - ./experiments:/app/experiments
+      - ./test_data:/app/test_data
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -156,6 +228,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: ["python", "-m", "zeroshield.worker"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9200/metrics', timeout=3)"]
@@ -179,6 +253,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: ["python", "-m", "zeroshield.worker.intelligence_main"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9201/metrics', timeout=3)"]
@@ -192,15 +268,14 @@ services:
     image: zeroshield:latest
     ports:
       - "8502:8501"
-    environment:
-      ZEROSHIELD_EVIDENCE_BACKEND: minio
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: zeroshield
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-zeroshield123}
-      MINIO_SECURE: "false"
+    # No ZEROSHIELD_EVIDENCE_BACKEND/MINIO_* here (final release verification fix) -
+    # deliberately local, matching api/worker; see the top-of-file comment on
+    # ZEROSHIELD_EVIDENCE_BACKEND for why.
     volumes:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports
+      - ./experiments:/app/experiments
+      - ./test_data:/app/test_data
     depends_on:
       minio:
         condition: service_healthy

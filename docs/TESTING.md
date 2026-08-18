@@ -115,14 +115,44 @@ Two tiers, gated in `apps/web/playwright.config.ts`:
 - **`workflows/`** — full multi-step journeys against a live backend
   (`docker compose up`), only run with `RUN_E2E_LIVE=1`: `full-lifecycle.spec.ts`
   (the Phase 4 CVE → Experiment Studio → Approve → Run → Verdict → Evidence
-  journey, as a single ADMIN) and `phase6-acceptance.spec.ts` (eight
-  scenarios, A through H, covering what Phase 6 added: auth/session
-  lifecycle, RBAC enforced both in the UI and via a direct API call,
-  self-approval blocking across two real RESEARCHER/REVIEWER accounts, the
-  audit trail, AI advisory-only assessments, revalidation, threat-intelligence
-  sync, and post-auth graceful degradation). See
+  journey, as a single ADMIN) and `governance-acceptance.spec.ts` (eight
+  browser-driven checks, labelled "Governance 1-8" - renamed from
+  `phase6-acceptance.spec.ts`'s "Scenario A-H" in the final release
+  verification pass, to stop implying these were the literal Phase 6
+  acceptance gate - covering auth/session lifecycle, RBAC enforced both in
+  the UI and via a direct API call, self-approval blocking across two real
+  RESEARCHER/REVIEWER accounts, the audit trail, AI advisory-only
+  assessments, revalidation, threat-intelligence sync, and post-auth
+  graceful degradation). See
   [`apps/web/e2e/README.md`](../apps/web/e2e/README.md) for how to seed the
   one required bootstrap ADMIN account and run this tier.
+
+## The V2 release acceptance suite (`tests/integration/test_v2_release_acceptance.py`)
+
+The authoritative, eight-scenario (A-H) final-release acceptance gate,
+executed against a real `docker compose up` stack rather than TestClient
+mocks or Playwright - several scenarios need infrastructure manipulation
+(stopping MinIO, restarting the worker container) a browser test isn't a
+natural fit for. Opt-in only, like the real-broker/real-Postgres tests
+above - set `ZEROSHIELD_E2E_LIVE_STACK_URL` (and the stack must actually be
+running) or it self-skips:
+
+| Scenario | Covers |
+|---|---|
+| A | Fresh DB → migrations → a controlled/seeded intelligence record → VPN validation candidate → Experiment Studio → dataset → approval → run → deterministic verdict → evidence → integrity verification. |
+| B | The same governed V2 path, Telecom domain. |
+| C | An unapproved/denied experiment cannot execute. |
+| D | A RESEARCHER cannot self-approve their own version; a separate REVIEWER can. |
+| E | A deterministic control-effectiveness degradation produces a regression finding and a corresponding revalidation candidate. |
+| F | AI unconfigured (no `ANTHROPIC_API_KEY`): every non-AI core route still works. |
+| G | MinIO stopped mid-run: the job fails safely - never a falsely-reported `completed` evidence record. |
+| H | Worker container restarted mid-processing: persisted run state stays coherent: no duplicate job records, no partially-written evidence silently treated as complete. |
+
+Every scenario uses controlled fixtures/seed data - none depend on live
+public-internet CVE data, per this project's existing no-live-network
+policy for deterministic tests (`docs/TESTING.md` § Threat Intelligence
+tests). See `docs/DEPLOYMENT.md` for the actual, real execution results
+from the final release verification pass.
 
 ## Known gaps (not covered by this suite)
 

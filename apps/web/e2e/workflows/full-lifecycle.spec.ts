@@ -15,8 +15,8 @@ import { expect, loginAsAdmin, test } from "../fixtures";
  * Runs as a single ADMIN account throughout (V2 Phase 6 adds session auth and blocks
  * self-approval - REVIEWER/RESEARCHER cannot approve their own version - but ADMIN is an
  * intentional override, so one bootstrap account can still exercise this whole single-actor
- * journey; see e2e/workflows/phase6-acceptance.spec.ts Scenario C for the multi-actor,
- * self-approval-blocked version of this same flow).
+ * journey; see e2e/workflows/governance-acceptance.spec.ts Governance 3 for the
+ * multi-actor, self-approval-blocked version of this same flow).
  */
 
 test("CVE -> Experiment Studio draft -> approve -> run -> verdict -> evidence", async ({ page }) => {
@@ -36,18 +36,18 @@ test("CVE -> Experiment Studio draft -> approve -> run -> verdict -> evidence", 
   await page.getByLabel("Vendor mitigation").fill("Vendor ships a rate limiter.");
   await page.getByLabel("Mitigation gap").fill("Rate limiter does not validate request shape.");
   await page.getByLabel("Source URLs (one per line)").fill("https://example.com/advisory");
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
 
-  await page.getByRole("button", { name: "Next" }).click(); // domain pack/template auto-selected
+  await page.getByRole("button", { name: "Next", exact: true }).click(); // domain pack/template auto-selected
   await page.getByLabel("Title").fill("E2E validation experiment");
   await page.getByLabel("Description").fill("Created by the Playwright full-lifecycle spec.");
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
 
   await page.getByRole("button", { name: "Preview dataset" }).click();
   await expect(page.getByText(/cases · sha256/)).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
 
-  await page.getByRole("button", { name: "Next" }).click(); // strategy/metrics defaults
+  await page.getByRole("button", { name: "Next", exact: true }).click(); // strategy/metrics defaults
 
   await page.getByLabel("Failure pattern").selectOption({ index: 1 });
   await page.getByLabel("Root cause", { exact: true }).selectOption({ index: 1 });
@@ -55,7 +55,7 @@ test("CVE -> Experiment Studio draft -> approve -> run -> verdict -> evidence", 
   await page.getByLabel("Mitigation gap", { exact: true }).fill("Rate limiter does not validate request shape.");
   await page.getByLabel("Research question").fill("Does the mitigation reduce malformed-request acceptance?");
   await page.getByLabel("Hypothesis").fill("The mitigation blocks more malformed cases than baseline.");
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
 
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByText(/Draft saved:/)).toBeVisible();

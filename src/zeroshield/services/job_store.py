@@ -10,6 +10,8 @@ as the durable, inspectable record (evidence, comparisons, exports all work
 the same way).
 """
 
+import os
+import uuid
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -86,8 +88,22 @@ class JobStore:
         return self._jobs_dir / f"{job_id}.json"
 
     def save(self, record: JobRecord) -> None:
+        """Writes via a temp-file-then-atomic-rename (os.replace), never a
+        direct write_text() (final release verification fix) - write_text()
+        opens in "w" mode, which truncates the file to zero bytes before
+        writing a single byte of the new content, and this file is read
+        concurrently by a *different process* (the API, polled by clients
+        while the worker is mid-save) - a real, reproduced race under the
+        live docker-compose stack: GET /jobs/{id} 500'd with a Pydantic
+        "EOF while parsing a value" error because it read the file in that
+        truncated window. os.replace() is atomic on both POSIX and Windows -
+        a concurrent reader always sees either the complete old content or
+        the complete new content, never a torn/empty file."""
         self._jobs_dir.mkdir(parents=True, exist_ok=True)
-        self._path(record.job_id).write_text(record.model_dump_json(indent=2), encoding="utf-8")
+        path = self._path(record.job_id)
+        tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+        tmp_path.write_text(record.model_dump_json(indent=2), encoding="utf-8")
+        os.replace(tmp_path, path)
 
     def load(self, job_id: str) -> JobRecord | None:
         path = self._path(job_id)

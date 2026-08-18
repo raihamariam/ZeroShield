@@ -1,8 +1,9 @@
 name: CI
 
-# CI only - lint, type-check, and test the backend and frontend on every push
-# and pull request. Deliberately no deployment/publish/release steps, no
-# Docker image push (V2 Phase 6, Step 6: "CI only, no deployment").
+# CI only - lint, type-check, test, and (build-only) verify every Docker
+# image on every push and pull request. Deliberately no deployment/publish/
+# release steps, no image push/registry login anywhere in this workflow
+# (V2 Phase 6, Step 6: "CI only, no deployment").
 
 on:
   push:
@@ -83,3 +84,19 @@ jobs:
         # workflows/ (RUN_E2E_LIVE=1) needs the full docker-compose stack and a
         # seeded ADMIN account - deliberately not run in CI; see apps/web/e2e/README.md.
         run: npm run test:e2e
+
+  docker-build:
+    name: Docker image builds (backend + web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verifies every image docker-compose.yml builds actually builds -
+      # backend (zeroshield:latest, used by api/worker/intelligence-worker/
+      # migrate/dashboard) and web (zeroshield-web:latest). No push, no
+      # registry login, no deployment - build-only, catching exactly the
+      # class of bug a passing pytest/vitest run can't (a Dockerfile missing
+      # a COPY/extra that only breaks inside the container - see
+      # docs/DEPLOYMENT.md for the real one this caught).
+      - name: docker compose build
+        run: docker compose build

@@ -1,26 +1,38 @@
 """OpenTelemetry tracing configuration (V2 Phase 6, Step 5).
 
-A run is traceable as one distributed trace across every process boundary it
-crosses - browser -> Next.js -> FastAPI -> RabbitMQ -> worker -> validation
--> evidence - by propagating the W3C traceparent header through the one hop
-that would otherwise disconnect the trace: the RabbitMQ message (see
-inject_trace_context/extract_trace_context, used by
+FastAPI (`FastAPIInstrumentor.instrument_app`, zeroshield.api.app) is the
+trace root - there is no browser- or Next.js-side OpenTelemetry
+instrumentation, so a trace does not begin until a request reaches the API.
+From there, a run/sync is traceable as one distributed trace across the
+process boundaries it crosses on the backend - API -> RabbitMQ -> worker ->
+validation -> evidence - by propagating the W3C traceparent header through
+the one hop that would otherwise disconnect the trace: the RabbitMQ message
+(see inject_trace_context/extract_trace_context, used by
 zeroshield.api.messaging.publish_run_job and
 zeroshield.worker.main/intelligence_main's consume loops).
+
+request_id (zeroshield.api.observability.RequestContextMiddleware) is a
+separate, older correlation mechanism, not an OTel span attribute, and is
+generated fresh (server-side UUID4 hex) on every request today - the
+middleware *would* reuse an inbound X-Request-ID header if a caller set
+one, but apps/web's own fetch calls do not currently set that header, so in
+practice this is API-only, not something that actually originates in the
+browser yet. It is joined to trace_id/span_id only at the *logging* layer
+(zeroshield.observability.logging.JsonFormatter reads both the current span
+and this request_id and puts them on the same JSON log line) - a log line
+is where the two mechanisms meet, not the trace itself.
 
 No exporter is attached unless one is explicitly requested:
   - OTEL_EXPORTER_OTLP_ENDPOINT set -> spans are sent to that OTLP/HTTP
     collector (Jaeger, Tempo, etc.) - the real deployment path.
   - ZEROSHIELD_TRACING_CONSOLE=1 -> spans are dumped to stdout as JSON - a
     local debugging aid.
-  - neither set (the default) -> the TracerProvider still exists, spans are
-    still created and still carry the request_id (see
-    zeroshield.api.observability.RequestContextMiddleware) as an attribute,
-    but nothing is exported anywhere. This matters in practice: it means
-    running the app - or the ~1000-test suite, which exercises the
-    instrumented FastAPI app via TestClient thousands of times per run -
-    never requires a collector to be reachable and never spams stdout/CI
-    logs with span dumps.
+  - neither set (the default) -> the TracerProvider still exists and spans
+    are still created, but nothing is exported anywhere. This matters in
+    practice: it means running the app - or the ~1000-test suite, which
+    exercises the instrumented FastAPI app via TestClient thousands of
+    times per run - never requires a collector to be reachable and never
+    spams stdout/CI logs with span dumps.
 """
 
 import os

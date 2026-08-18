@@ -83,10 +83,10 @@ def get_run_repository() -> RunRepository:
     if not database_url:
         return NullRunRepository()
 
-    from zeroshield.db.session import build_sessionmaker
+    from zeroshield.db.session import get_shared_sessionmaker
     from zeroshield.repositories.postgres_run_repository import PostgresRunRepository
 
-    return PostgresRunRepository(build_sessionmaker())
+    return PostgresRunRepository(get_shared_sessionmaker())
 
 
 def get_vulnerability_repository() -> "VulnerabilityRepository":
@@ -108,10 +108,10 @@ def get_vulnerability_repository() -> "VulnerabilityRepository":
             },
         )
 
-    from zeroshield.db.session import build_sessionmaker
+    from zeroshield.db.session import get_shared_sessionmaker
     from zeroshield.intelligence.repository import VulnerabilityRepository
 
-    return VulnerabilityRepository(build_sessionmaker())
+    return VulnerabilityRepository(get_shared_sessionmaker())
 
 
 def get_intelligence_publisher(
@@ -138,10 +138,10 @@ def get_experiment_version_repository() -> "ExperimentVersionRepository":
             },
         )
 
-    from zeroshield.db.session import build_sessionmaker
+    from zeroshield.db.session import get_shared_sessionmaker
     from zeroshield.studio.repository import ExperimentVersionRepository
 
-    return ExperimentVersionRepository(build_sessionmaker())
+    return ExperimentVersionRepository(get_shared_sessionmaker())
 
 
 def get_assurance_repository() -> "AssuranceRepository":
@@ -158,9 +158,9 @@ def get_assurance_repository() -> "AssuranceRepository":
         )
 
     from zeroshield.assurance.repository import AssuranceRepository
-    from zeroshield.db.session import build_sessionmaker
+    from zeroshield.db.session import get_shared_sessionmaker
 
-    return AssuranceRepository(build_sessionmaker())
+    return AssuranceRepository(get_shared_sessionmaker())
 
 
 def get_ai_provider() -> "AIProvider":
@@ -215,9 +215,9 @@ def get_auth_repository() -> "AuthRepository":
         )
 
     from zeroshield.auth.repository import AuthRepository
-    from zeroshield.db.session import build_sessionmaker
+    from zeroshield.db.session import get_shared_sessionmaker
 
-    return AuthRepository(build_sessionmaker())
+    return AuthRepository(get_shared_sessionmaker())
 
 
 def get_audit_repository() -> "AuditRepository":
@@ -229,9 +229,9 @@ def get_audit_repository() -> "AuditRepository":
         )
 
     from zeroshield.audit.repository import AuditRepository
-    from zeroshield.db.session import build_sessionmaker
+    from zeroshield.db.session import get_shared_sessionmaker
 
-    return AuditRepository(build_sessionmaker())
+    return AuditRepository(get_shared_sessionmaker())
 
 
 def get_auth_service(

@@ -82,9 +82,22 @@ one is explicitly requested.**
 
 ### What is traced
 
-`FastAPIInstrumentor.instrument_app(app)` wraps the ASGI app directly (not
-`app.add_middleware`), so its span is the outermost one on every API
-request - the root of the browser -> API leg. From there:
+**FastAPI is the trace root - there is no browser- or Next.js-side
+OpenTelemetry instrumentation.** A trace does not begin until a request
+actually reaches the API; a browser click and the Next.js Server Component
+fetch that follows it are both outside any trace. `request_id` (§2 above)
+is a *different, older* correlation mechanism (a plain `X-Request-ID`
+header, not an OTel trace) and it is currently API-only in practice too -
+`RequestContextMiddleware` would reuse an inbound header if a caller set
+one, but `apps/web`'s own fetch calls do not currently set it, so today
+every `request_id` is generated fresh server-side, the same as trace
+spans. The two are only joined together at the logging layer (§2), not as
+a single distributed trace, and neither one currently starts in the
+browser.
+
+From the API onward: `FastAPIInstrumentor.instrument_app(app)` wraps the
+ASGI app directly (not `app.add_middleware`), so its span is the outermost
+one on every API request.
 
 - **API -> RabbitMQ**: `zeroshield.api.messaging.publish_run_job` and
   `zeroshield.intelligence.messaging.publish_sync_job` inject the current
@@ -95,8 +108,15 @@ request - the root of the browser -> API leg. From there:
   a `CONSUMER`-kind span (`worker.process_run_job` /
   `intelligence_worker.run_sync`) as its child, tagged with
   `zeroshield.job_id`/`zeroshield.sync_id` - so one run or one sync is a
-  single distributed trace from the browser click through to the worker
-  finishing the job, not two disconnected traces either side of the queue.
+  single distributed trace from the moment the API accepts the request
+  through to the worker finishing the job, not two disconnected traces
+  either side of the queue.
+
+Extending this to a genuine browser-to-worker trace would mean adding the
+OpenTelemetry Web SDK to `apps/web` and propagating `traceparent` through
+its own `fetch()` calls to the API - not implemented, and not planned
+unless a real debugging need for browser-side spans specifically emerges
+(see [`docs/FUTURE_OPPORTUNITIES.md`](FUTURE_OPPORTUNITIES.md)).
 
 A missing/malformed header (e.g. an older queued message from before this
 was added) just produces a fresh root span on the worker side - never an

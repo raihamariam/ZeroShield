@@ -217,8 +217,8 @@ bare CLI, since it demonstrates the governed, multi-actor web workflow.
    `request_id` that also appears in that request's structured log line
    (see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md)).
 
-This is the automated version of the same journey: `apps/web/e2e/workflows/phase6-acceptance.spec.ts`
-Scenario C runs steps 4-6 end-to-end via Playwright, Scenario D runs step 7 -
+This is the automated version of the same journey: `apps/web/e2e/workflows/governance-acceptance.spec.ts`
+Governance 3 runs steps 4-6 end-to-end via Playwright, Governance 4 runs step 7 -
 see [`docs/TESTING.md`](TESTING.md#end-to-end-browser-tests-appswebe2e-playwright).
 
 ## What this demonstrated

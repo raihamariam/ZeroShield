@@ -22,3 +22,11 @@ jobs/*
 .claude/
 .agents/
 commands.txt
+
+# Real local environment files (final release verification fix) - .env.example
+# is the only env file meant to be tracked; anything without the .example
+# suffix is assumed to carry real local secrets (POSTGRES_PASSWORD,
+# MINIO_ROOT_PASSWORD, GRAFANA_ADMIN_PASSWORD, ANTHROPIC_API_KEY, ...).
+.env
+.env.*
+!.env.example

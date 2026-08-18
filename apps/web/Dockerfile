@@ -21,6 +21,15 @@ RUN npm run build
 FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Docker always sets HOSTNAME to the container ID by default, and Next.js's
+# standalone server.js binds to $HOSTNAME instead of every interface -
+# without this override the server is unreachable via localhost/127.0.0.1/
+# ::1 from inside its own container (only reachable via the container's
+# real bridge-network IP, which is why a healthcheck run inside the
+# container failed while the host-published port kept working). This bit
+# a Docker healthcheck added in the final release verification pass, not a
+# byte of application code.
+ENV HOSTNAME=0.0.0.0
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

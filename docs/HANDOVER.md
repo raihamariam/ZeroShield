@@ -148,10 +148,12 @@ REVIEWER, more ADMINs) is created from the Users page by an existing ADMIN.
 
 Phase 6 also added structured JSON logging, a `request_id`/`trace_id`
 correlated across every log line and audit row for one request, and
-OpenTelemetry distributed tracing across the browser → API → RabbitMQ →
-worker hop (no exporter configured by default - spans are created but
-inert unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `ZEROSHIELD_TRACING_CONSOLE=1`
-is set). See [`docs/OBSERVABILITY.md`](OBSERVABILITY.md).
+OpenTelemetry distributed tracing rooted at FastAPI and propagated across
+the API → RabbitMQ → worker hop (no browser/Next.js instrumentation exists
+- the trace begins when a request reaches the API, not in the browser; no
+exporter is configured by default either - spans are created but inert
+unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `ZEROSHIELD_TRACING_CONSOLE=1` is
+set). See [`docs/OBSERVABILITY.md`](OBSERVABILITY.md).
 
 ## 5. Safety controls
 

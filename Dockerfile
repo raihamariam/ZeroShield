@@ -29,6 +29,15 @@
 # ANTHROPIC_API_KEY and the app falls back to NullAIProvider - Step 1: "Core
 # ZeroShield must still work when AI is disabled"), but is included here so
 # the opt-in path works without a separate image.
+#
+# alembic.ini and alembic/ are copied in (final release verification fix) so
+# `python -m alembic upgrade head` can actually run inside this image - the
+# `migrate` service in docker-compose.yml uses this same image for exactly
+# that, once against postgres:5432, before api/worker/intelligence-worker
+# start. Without these two lines the image built and started fine but a
+# fresh Postgres volume was never migrated - every DB-backed feature
+# (including login, since V2 Phase 6 auth is DB-backed) would fail with
+# "relation does not exist" on first use rather than at build/start time.
 
 FROM python:3.12-slim
 
@@ -38,6 +47,8 @@ COPY pyproject.toml ./
 COPY src ./src
 COPY experiments ./experiments
 COPY test_data ./test_data
+COPY alembic.ini ./
+COPY alembic ./alembic
 
 RUN pip install --no-cache-dir ".[api,dashboard,queue,storage,db,intelligence,excel,auth,ai]"
 

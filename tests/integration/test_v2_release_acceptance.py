@@ -260,50 +260,69 @@ def test_scenario_a_vpn_full_governed_flow(admin_client: httpx.Client, admin_cre
     assert candidate is not None, "controlled VPN fixture CVE did not produce a ValidationCandidate"
     vuln_repo.upsert_validation_candidate(candidate)
 
-    queue = admin_client.get("/priority-queue")
-    assert queue.status_code == 200, queue.text
-    assert any(c["cve_id"] == cve_id for c in queue.json()["candidates"]), (
-        "seeded CVE did not appear in the live priority queue"
-    )
+    try:
+        queue = admin_client.get("/priority-queue")
+        assert queue.status_code == 200, queue.text
+        assert any(c["cve_id"] == cve_id for c in queue.json()["candidates"]), (
+            "seeded CVE did not appear in the live priority queue"
+        )
 
-    # -- Experiment Studio: dataset -> draft -> approval (separate REVIEWER,
-    # also covers Scenario D) -> run -> verdict -> evidence ---------------
-    researcher_client = _api()
-    _login(researcher_client, researcher_username, researcher_password)
+        # -- Experiment Studio: dataset -> draft -> approval (separate REVIEWER,
+        # also covers Scenario D) -> run -> verdict -> evidence ---------------
+        researcher_client = _api()
+        _login(researcher_client, researcher_username, researcher_password)
 
-    experiment_id = f"ZC-VPN-EXP-9{RUN_TAG_NUM}"
-    version = _create_and_run_experiment_version(
-        researcher_client, experiment_id=experiment_id, domain_pack_id="vpn",
-        template_id="vpn_schema_canonicalisation", template_version="1.0.0",
-        cve_id=cve_id, domain="VPN", dataset_config={"oversized_count": 2}, seed=1,
-    )
+        experiment_id = f"ZC-VPN-EXP-9{RUN_TAG_NUM}"
+        version = _create_and_run_experiment_version(
+            researcher_client, experiment_id=experiment_id, domain_pack_id="vpn",
+            template_id="vpn_schema_canonicalisation", template_version="1.0.0",
+            cve_id=cve_id, domain="VPN", dataset_config={"oversized_count": 2}, seed=1,
+        )
 
-    reviewer_client = _api()
-    _login(reviewer_client, reviewer_username, reviewer_password)
-    started = reviewer_client.post(f"/experiment-versions/{version['version_id']}/start-review", json={})
-    assert started.status_code == 200, started.text
-    approved = reviewer_client.post(f"/experiment-versions/{version['version_id']}/approve", json={})
-    assert approved.status_code == 200, approved.text
+        reviewer_client = _api()
+        _login(reviewer_client, reviewer_username, reviewer_password)
+        started = reviewer_client.post(f"/experiment-versions/{version['version_id']}/start-review", json={})
+        assert started.status_code == 200, started.text
+        approved = reviewer_client.post(f"/experiment-versions/{version['version_id']}/approve", json={})
+        assert approved.status_code == 200, approved.text
 
-    run_resp = researcher_client.post(f"/experiment-versions/{version['version_id']}/runs", json={})
-    assert run_resp.status_code == 202, run_resp.text
-    job_id = run_resp.json()["job_id"]
+        run_resp = researcher_client.post(f"/experiment-versions/{version['version_id']}/runs", json={})
+        assert run_resp.status_code == 202, run_resp.text
+        job_id = run_resp.json()["job_id"]
 
-    final_job = _poll_job(admin_client, job_id)
-    assert final_job["status"] == "completed", f"VPN run did not complete: {final_job}"
+        final_job = _poll_job(admin_client, job_id)
+        assert final_job["status"] == "completed", f"VPN run did not complete: {final_job}"
 
-    verdict = admin_client.get(f"/experiments/{experiment_id}/verdict")
-    assert verdict.status_code == 200, verdict.text
-    verdict_body = verdict.json()
-    assert verdict_body["label"] in {
-        "effective", "partially_effective", "ineffective", "regression", "inconclusive",
-    }, verdict_body
+        verdict = admin_client.get(f"/experiments/{experiment_id}/verdict")
+        assert verdict.status_code == 200, verdict.text
+        verdict_body = verdict.json()
+        assert verdict_body["label"] in {
+            "effective", "partially_effective", "ineffective", "regression", "inconclusive",
+        }, verdict_body
 
-    evidence = admin_client.get(f"/experiments/{experiment_id}/evidence")
-    assert evidence.status_code == 200, evidence.text
-    evidence_body = evidence.json()
-    assert evidence_body["baseline"]["integrity_verified"] is True
-    assert evidence_body["mitigation"]["integrity_verified"] is True
+        evidence = admin_client.get(f"/experiments/{experiment_id}/evidence")
+        assert evidence.status_code == 200, evidence.text
+        evidence_body = evidence.json()
+        assert evidence_body["baseline"]["integrity_verified"] is True
+        assert evidence_body["mitigation"]["integrity_verified"] is True
+    finally:
+        # This scenario's own controlled intelligence fixture (unlike every other
+        # scenario's fixtures, which live only in the ephemeral job/experiment-version
+        # tables) writes directly into vulnerabilities/validation_candidates, which are
+        # what the Priority Queue reads from - left behind, it pollutes a long-lived
+        # local database's demo view indefinitely. Best-effort: never mask a real
+        # assertion failure above with a cleanup error.
+        try:
+            with session_factory() as cleanup_session:
+                from sqlalchemy import text as _text
+
+                cleanup_session.execute(
+                    _text("DELETE FROM validation_candidates WHERE cve_id = :c"), {"c": cve_id}
+                )
+                cleanup_session.execute(_text("DELETE FROM vulnerabilities WHERE cve_id = :c"), {"c": cve_id})
+                cleanup_session.commit()
+        except Exception as cleanup_error:  # noqa: BLE001 - best-effort, must never mask the real assertion above
+            print(f"Scenario A fixture cleanup failed (non-fatal): {cleanup_error}")
 
 
 # -- Scenario B: Telecom flow, same governed path ----------------------------

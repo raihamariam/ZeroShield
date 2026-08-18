@@ -529,6 +529,26 @@ def test_scenario_f_ai_unconfigured_core_still_works(admin_client: httpx.Client)
     """docker-compose.yml sets no ANTHROPIC_API_KEY/AI_PROVIDER for the api
     service, so this is the stack's real, default, unmodified state - not a
     simulated one."""
+    # Seed a minimal, deterministic Vulnerability record so the AI route's own
+    # 404-if-unknown-CVE check never masks the thing this scenario actually
+    # proves (AI_PROVIDER unset -> 503 ai_unavailable). No other scenario
+    # seeds this exact CVE into the VulnerabilityRepository.
+    from zeroshield.db.session import build_engine, build_sessionmaker
+    from zeroshield.intelligence.repository import VulnerabilityRepository
+    from zeroshield.models.enums import Domain
+    from zeroshield.models.vulnerability import Vulnerability
+
+    vuln_repo = VulnerabilityRepository(build_sessionmaker(build_engine()))
+    now = datetime.now(UTC)
+    vuln_repo.upsert_vulnerability(
+        Vulnerability(
+            cve_id="CVE-2024-21762",
+            description="Controlled fixture CVE for Scenario F (AI-unconfigured core-functionality check).",
+            cvss_score=9.8, epss_score=0.85, kev_listed=True, domain_guess=Domain.VPN,
+            first_seen_at=now, last_updated_at=now,
+        )
+    )
+
     health = admin_client.get("/health")
     assert health.status_code == 200, health.text
 
@@ -554,15 +574,15 @@ def test_scenario_f_ai_unconfigured_core_still_works(admin_client: httpx.Client)
 
 
 def test_scenario_g_minio_unavailable_fails_safely(admin_client: httpx.Client) -> None:
-    """docker-compose.yml's `worker` service defaults to the local evidence
-    backend (final release verification fix - see docker-compose.yml's
-    top-of-file comment on ZEROSHIELD_EVIDENCE_BACKEND for why), so this
-    scenario stops the persistent worker (so it can't race for the job),
-    starts a one-off worker container with ZEROSHIELD_EVIDENCE_BACKEND=minio
-    forced, stops minio, submits a run, and asserts the job reaches FAILED -
-    never a falsely-reported `completed` evidence record. Restores the
-    normal persistent worker afterwards regardless of outcome so later
-    scenarios in this module are unaffected."""
+    """docker-compose.yml's `worker` service already defaults to
+    ZEROSHIELD_EVIDENCE_BACKEND=minio (see docker-compose.yml's top-of-file
+    comment) - this scenario stops the persistent worker (so it can't race
+    for the job), starts a one-off worker container with the same
+    MinIO-backed env explicitly set (so this scenario's premise holds even
+    if that default ever changes), stops minio, submits a run, and asserts
+    the job reaches FAILED - never a falsely-reported `completed` evidence
+    record. Restores the normal persistent worker afterwards regardless of
+    outcome so later scenarios in this module are unaffected."""
     stopped_worker = _run_compose("stop", "worker")
     assert stopped_worker.returncode == 0, stopped_worker.stderr
     # docker compose stop returning does not guarantee the stopped

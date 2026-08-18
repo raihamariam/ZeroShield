@@ -23,10 +23,10 @@ export default async function IntegrationsPage() {
     settle(authApi.me()),
   ]);
   // POST /intelligence/sync requires RESEARCHER or ADMIN server-side (see
-  // require_role in zeroshield.api.routes.intelligence.submit_sync) - hiding
-  // it for VIEWER here is a UI convenience only, not the enforcement
-  // boundary, which stays server-side regardless of what this check does.
-  const canTriggerSync = me.ok && me.data.role !== "viewer";
+  // require_role in zeroshield.api.routes.intelligence.submit_sync) - matching
+  // that exactly here (not just "hide for VIEWER") is a UI convenience only,
+  // not the enforcement boundary, which stays server-side regardless.
+  const canTriggerSync = me.ok && (me.data.role === "researcher" || me.data.role === "admin");
 
   return (
     <div className="flex flex-col gap-6">

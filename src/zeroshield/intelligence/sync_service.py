@@ -17,7 +17,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from zeroshield.experiments.discovery import discover_experiments
-from zeroshield.intelligence.candidates import generate_candidate
+from zeroshield.intelligence.candidates import classify_domain, generate_candidate
 from zeroshield.intelligence.connectors.base import ThreatIntelligenceConnector
 from zeroshield.intelligence.connectors.http import ConnectorFetchError
 from zeroshield.intelligence.connectors.vendor_advisory import VendorAdvisoryConnector
@@ -141,6 +141,19 @@ def run_sync(
             vulnerability = repository.get_vulnerability(cve_id)
             if vulnerability is None:
                 continue
+            # classify_domain() is candidate generation's own deterministic domain
+            # classification (the same one generate_candidate() uses below) - persist
+            # it onto the canonical Vulnerability record too, since the vulnerability
+            # detail page (priority score, domain badge, "Validate this CVE") reads
+            # Vulnerability.domain_guess, not the ValidationCandidate. Previously only
+            # the candidate got the classified domain; domain_guess itself was left at
+            # whatever dedup.merge() carried over (None for a newly-merged CVE), so a
+            # real, correctly-classified CVE would score/rank correctly in the Priority
+            # Queue but show no domain/score/"Validate this CVE" on its own detail page.
+            classification = classify_domain(vulnerability)
+            if vulnerability.domain_guess != classification.domain:
+                vulnerability = vulnerability.model_copy(update={"domain_guess": classification.domain})
+                repository.upsert_vulnerability(vulnerability)
             candidate = generate_candidate(
                 vulnerability, experiment_ids_by_cve=experiment_ids_by_cve, weights=weights, clock=clock
             )

@@ -176,6 +176,30 @@ def test_run_sync_generates_validation_candidate_for_supported_domain(
     assert candidates[0].existing_experiment_ids == ["ZC-VPN-EXP-001"]
 
 
+def test_run_sync_persists_classified_domain_onto_the_vulnerability_record(
+    vuln_repo: VulnerabilityRepository,
+) -> None:
+    """The deterministic domain classification generate_candidate() uses for a
+    SUPPORTED/PARTIALLY_SUPPORTED CVE must also land on Vulnerability.domain_guess,
+    not just the ValidationCandidate - the vulnerability detail page (domain badge,
+    priority score, "Validate this CVE") reads domain_guess, and dedup.merge() alone
+    never sets it for a newly-merged CVE."""
+    raw = _nvd_item("CVE-2024-00099")
+    raw["descriptions"] = [{"lang": "en", "value": "FortiOS SSL VPN out-of-bound write"}]
+    records = [RawIntelligenceRecord(source=VulnerabilitySourceName.NVD, external_id="CVE-2024-00099", raw=raw)]
+
+    run_sync(_FakeConnector(records), sync_id="SYNC-9", repository=vuln_repo, experiments_dir=EXPERIMENTS_DIR)
+
+    vulnerability = vuln_repo.get_vulnerability("CVE-2024-00099")
+    assert vulnerability is not None
+    assert vulnerability.domain_guess is not None and vulnerability.domain_guess.value == "VPN"
+
+    candidates, total = vuln_repo.list_priority_queue()
+    assert total == 1
+    assert candidates[0].cve_id == "CVE-2024-00099"
+    assert candidates[0].domain is not None and candidates[0].domain.value == "VPN"
+
+
 def test_run_sync_without_experiments_dir_skips_coverage_lookup_gracefully(
     vuln_repo: VulnerabilityRepository,
 ) -> None:

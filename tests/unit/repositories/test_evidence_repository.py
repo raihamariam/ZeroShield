@@ -92,3 +92,47 @@ def test_save_comparison_writes_readable_json(tmp_path: Path, evidence_metrics: 
     assert path == tmp_path / "ZC-VPN-EXP-999" / "comparison.json"
     loaded = ComparisonReport.model_validate_json(path.read_text(encoding="utf-8"))
     assert loaded == report
+
+
+def test_load_comparison_round_trips(tmp_path: Path, evidence_metrics: ExperimentMetrics) -> None:
+    """Final release gap-closure pass: load_comparison completes the read
+    side of the same abstraction save_comparison already had - this is
+    what zeroshield.services.experiment_service.load_latest_evidence reads
+    through instead of a raw filesystem path, so it honours whichever
+    EvidenceRepository actually wrote the data."""
+    mitigation_metrics = evidence_metrics.model_copy(update={"run_id": "RUN-002"})
+    report = ComparisonReport(
+        experiment_id="ZC-VPN-EXP-999", baseline_run_id="RUN-001", mitigation_run_id="RUN-002",
+        total_cases=22, baseline_metrics=evidence_metrics, mitigation_metrics=mitigation_metrics,
+        block_rate_improvement=1.0, latency_overhead_ms=0.5, limitations=["synthetic model only"],
+        generated_at=STARTED,
+    )
+    repo = LocalEvidenceRepository(tmp_path)
+    repo.save_comparison("ZC-VPN-EXP-999", report)
+
+    loaded = repo.load_comparison("ZC-VPN-EXP-999")
+    assert loaded == report
+
+
+def test_load_comparison_returns_none_when_nothing_saved_yet(tmp_path: Path) -> None:
+    repo = LocalEvidenceRepository(tmp_path)
+    assert repo.load_comparison("ZC-VPN-EXP-999") is None
+
+
+def test_load_artefact_round_trips_a_named_run_artefact(
+    tmp_path: Path,
+    valid_experiment_definition_data: dict,
+    evidence_run_outcome: RunOutcome,
+    evidence_metrics: ExperimentMetrics,
+    evidence_policy_decision: PolicyDecision,
+) -> None:
+    experiment = ExperimentDefinition(**valid_experiment_definition_data)
+    bundle = build_run_evidence(
+        experiment, "vpn-pre-auth-request-v1", evidence_run_outcome, evidence_metrics, evidence_policy_decision,
+    )
+    repo = LocalEvidenceRepository(tmp_path)
+    repo.save_run_evidence(bundle)
+
+    manifest = repo.load_manifest("ZC-VPN-EXP-999", "RUN-001")
+    raw = repo.load_artefact("ZC-VPN-EXP-999", "RUN-001", str(manifest.artefact_paths["metrics"]))
+    assert raw == bundle.artefacts["metrics.json"]

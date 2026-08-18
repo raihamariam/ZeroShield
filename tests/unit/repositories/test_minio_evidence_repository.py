@@ -198,6 +198,57 @@ def test_save_comparison_round_trips(fake_backend: _FakeMinioBackend, evidence_m
     assert loaded == report
 
 
+def test_load_comparison_round_trips(fake_backend: _FakeMinioBackend, evidence_metrics: ExperimentMetrics) -> None:
+    """Final release gap-closure pass: completes the read side of this
+    abstraction - previously only LocalEvidenceRepository could ever be
+    read back from (zeroshield.services.experiment_service.
+    load_latest_evidence was hardcoded to it), so a MinIO-backed write
+    (this method's own save_comparison, confirmed working above) was
+    genuinely unreadable through the API/dashboard despite succeeding."""
+    mitigation_metrics = evidence_metrics.model_copy(update={"run_id": "RUN-002"})
+    report = ComparisonReport(
+        experiment_id="ZC-VPN-EXP-999", baseline_run_id="RUN-001", mitigation_run_id="RUN-002",
+        total_cases=22, baseline_metrics=evidence_metrics, mitigation_metrics=mitigation_metrics,
+        block_rate_improvement=1.0, latency_overhead_ms=0.5, limitations=["synthetic model only"],
+        generated_at=STARTED,
+    )
+    repo = MinioEvidenceRepository(fake_backend, "zeroshield-evidence")  # type: ignore[arg-type]
+    repo.save_comparison("ZC-VPN-EXP-999", report)
+
+    loaded = repo.load_comparison("ZC-VPN-EXP-999")
+    assert loaded == report
+
+
+def test_load_comparison_returns_none_when_nothing_saved_yet(fake_backend: _FakeMinioBackend) -> None:
+    repo = MinioEvidenceRepository(fake_backend, "zeroshield-evidence")  # type: ignore[arg-type]
+    assert repo.load_comparison("ZC-VPN-EXP-999") is None
+
+
+def test_load_artefact_round_trips_a_named_run_artefact(
+    fake_backend: _FakeMinioBackend,
+    valid_experiment_definition_data: dict,
+    evidence_run_outcome: RunOutcome,
+    evidence_metrics: ExperimentMetrics,
+    evidence_policy_decision: PolicyDecision,
+) -> None:
+    experiment = ExperimentDefinition(**valid_experiment_definition_data)
+    bundle = build_run_evidence(
+        experiment, "vpn-pre-auth-request-v1", evidence_run_outcome, evidence_metrics, evidence_policy_decision
+    )
+    repo = MinioEvidenceRepository(fake_backend, "zeroshield-evidence")  # type: ignore[arg-type]
+    repo.save_run_evidence(bundle)
+
+    manifest = repo.load_manifest("ZC-VPN-EXP-999", "RUN-001")
+    raw = repo.load_artefact("ZC-VPN-EXP-999", "RUN-001", str(manifest.artefact_paths["metrics"]))
+    assert raw == bundle.artefacts["metrics.json"]
+
+
+def test_load_artefact_raises_file_not_found_for_missing_object(fake_backend: _FakeMinioBackend) -> None:
+    repo = MinioEvidenceRepository(fake_backend, "zeroshield-evidence")  # type: ignore[arg-type]
+    with pytest.raises(FileNotFoundError):
+        repo.load_artefact("ZC-VPN-EXP-999", "RUN-999", "results.json")
+
+
 def test_default_minio_client_uses_local_dev_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in ("MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_SECURE"):
         monkeypatch.delenv(key, raising=False)

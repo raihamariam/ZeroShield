@@ -100,7 +100,7 @@ export default async function ApprovalsPage(props: PageProps<"/approvals">) {
                 {versions.map((v) => (
                   <TR key={v.version_id}>
                     <TD>
-                      <Link href={`/approvals/${v.version_id}`} className="font-medium text-accent hover:underline">
+                      <Link href={`/approvals/${encodeURIComponent(v.version_id)}`} className="font-medium text-accent hover:underline">
                         {v.version_id}
                       </Link>
                     </TD>

@@ -293,7 +293,7 @@ export default async function ExperimentDetailPage(props: PageProps<"/experiment
                 .sort((a, b) => b.version_number - a.version_number)
                 .map((v) => (
                   <li key={v.version_id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm">
-                    <Link href={`/approvals/${v.version_id}`} className="font-medium text-accent hover:underline">
+                    <Link href={`/approvals/${encodeURIComponent(v.version_id)}`} className="font-medium text-accent hover:underline">
                       v{v.version_number}
                     </Link>
                     <div className="flex items-center gap-3">

@@ -71,12 +71,11 @@ Enforcement is exclusively server-side. The web app *mostly* hides controls
 a caller's role can't use (better UX), but that is never the security
 boundary - `tests/security/test_rbac_hardening.py` calls every mutating
 route directly as a VIEWER and as an unauthenticated caller and asserts
-403/401 on all of them, independent of what the UI shows. One known,
-cosmetic gap found during the final release verification pass: the
-Integrations page's "Trigger sync" button is not role-gated client-side (a
-VIEWER sees it, unlike e.g. the Users page's "Create user" button which is)
-- clicking it still 403s, since the server-side check is unconditional.
-Worth a small frontend fix, not a security issue.
+403/401 on all of them, independent of what the UI shows. The Integrations
+page's "Trigger sync" button is now also hidden client-side for VIEWER
+(final fix pass), matching the Users page's "Create user" button - purely a
+UI convenience, since the server-side check was, and remains,
+unconditional either way.
 
 ## 3. Self-approval blocking
 

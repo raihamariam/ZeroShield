@@ -14,31 +14,33 @@
 # The management UI is likewise on an alternate host port (15673) to avoid
 # clashing with any other RabbitMQ instance already using 15672.
 #
-# MinIO (Milestone 22) is an available, alternative EvidenceRepository
-# backend - see zeroshield.repositories.MinioEvidenceRepository - not the
-# default any service here uses (all use ZEROSHIELD_EVIDENCE_BACKEND's
-# code-level default, "local"). It is included here so it can be exercised
-# manually; its ports are on alternates (9002/9003) to avoid clashing with
-# any other MinIO already using the default 9000/9001 on this machine.
+# MinIO (Milestone 22) is the default EvidenceRepository backend for this
+# containerised platform - see zeroshield.repositories.MinioEvidenceRepository
+# and zeroshield.services.experiment_service.resolve_evidence_repository, the
+# one function ZEROSHIELD_EVIDENCE_BACKEND is read through for BOTH writing
+# evidence (run_experiment) and reading it back (load_latest_evidence, which
+# every GET /experiments/{id}/verdict|results|evidence route and the
+# dashboard go through). Its ports are on alternates (9002/9003) to avoid
+# clashing with any other MinIO already using the default 9000/9001 on this
+# machine.
 #
-# It is NOT set as the default for worker/dashboard (final release
-# verification pass reverted an earlier docker-compose.yml that did) because
-# of a real, confirmed gap this audit found: zeroshield.services.
-# experiment_service.load_latest_evidence() - the one function GET
-# /experiments/{id}/verdict, /results, and /evidence, plus the dashboard,
-# all read through - is hardcoded to LocalEvidenceRepository regardless of
-# ZEROSHIELD_EVIDENCE_BACKEND. MinioEvidenceRepository itself writes evidence
-# correctly (confirmed by inspecting the MinIO bucket directly after a real
-# run), but with worker on "minio" and api on its "local" default, every
-# run's evidence became genuinely invisible through every API/UI read path -
-# 404 "no_evidence" despite a real, completed, integrity-verifiable run.
-# Fixing load_latest_evidence to be backend-aware is real follow-up work,
-# out of scope for this pass (no redesign of working code) - see
-# docs/DEPLOYMENT.md's final release verification report and
-# docs/FUTURE_OPPORTUNITIES.md. Until then, every service reading evidence
-# through the API/dashboard must agree with whichever backend the worker
-# that produced it used - api/worker/dashboard here all use "local" so they
-# always agree.
+# A prior version of this file set ZEROSHIELD_EVIDENCE_BACKEND=minio on
+# worker/dashboard only, with api left on the local default - a real,
+# confirmed bug: load_latest_evidence was hardcoded to LocalEvidenceRepository
+# regardless of this setting, so a run's evidence, correctly written to MinIO,
+# was invisible through every API/UI read path (404 "no_evidence" despite a
+# real, completed, integrity-verifiable run). Fixed properly (not worked
+# around) by making load_latest_evidence read through the same
+# resolve_evidence_repository() the write path already used - see
+# docs/DEPLOYMENT.md's final release verification report for the bug and the
+# fix, and docs/OBSERVABILITY.md/SECURITY.md for anything else from that pass.
+# api/worker/dashboard below all set ZEROSHIELD_EVIDENCE_BACKEND=minio now,
+# consistently, so whichever service reads a run's evidence always agrees
+# with whichever service wrote it.
+#
+# The bare-Python/CI/test default remains "local" (LocalEvidenceRepository) -
+# resolve_evidence_repository()'s own code-level default - so nothing outside
+# this compose file's containers needs a MinIO server running.
 #
 # Prometheus/Grafana (Milestone 23) scrape ONLY operational metrics (request
 # counts/latency, job outcome counts/durations) from api:8000/metrics and
@@ -60,11 +62,6 @@
 # requirement to run ZeroShield. Its host port is 5433, not Postgres's
 # default 5432, for the same non-default-port reason documented above for
 # rabbitmq/minio.
-#
-# worker/dashboard also get ZEROSHIELD_EVIDENCE_BACKEND=minio here, making
-# MinIO the default evidence store for the containerised platform, while the
-# bare-Python/CI/test default remains local (LocalEvidenceRepository) -
-# see zeroshield.services.experiment_service._default_evidence_repository.
 #
 # web (V2 Phase 4) is the primary ZeroShield UI - a separate Next.js image (apps/web/
 # Dockerfile), never sharing the Python image. It consumes the api service exclusively
@@ -184,6 +181,11 @@ services:
     environment:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       DATABASE_URL: postgresql+psycopg://zeroshield:${POSTGRES_PASSWORD:-zeroshield123}@postgres:5432/zeroshield
+      ZEROSHIELD_EVIDENCE_BACKEND: minio
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: zeroshield
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-zeroshield123}
+      MINIO_SECURE: "false"
     volumes:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports
@@ -194,6 +196,8 @@ services:
       rabbitmq:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
@@ -213,9 +217,11 @@ services:
     environment:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       DATABASE_URL: postgresql+psycopg://zeroshield:${POSTGRES_PASSWORD:-zeroshield123}@postgres:5432/zeroshield
-      # Deliberately local, matching `api` below (final release verification fix) - see
-      # the top-of-file comment on ZEROSHIELD_EVIDENCE_BACKEND for why MinIO is not the
-      # default here despite the minio service being started either way.
+      ZEROSHIELD_EVIDENCE_BACKEND: minio
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: zeroshield
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-zeroshield123}
+      MINIO_SECURE: "false"
     volumes:
       - ./results:/app/results
       - ./jobs:/app/jobs
@@ -268,9 +274,12 @@ services:
     image: zeroshield:latest
     ports:
       - "8502:8501"
-    # No ZEROSHIELD_EVIDENCE_BACKEND/MINIO_* here (final release verification fix) -
-    # deliberately local, matching api/worker; see the top-of-file comment on
-    # ZEROSHIELD_EVIDENCE_BACKEND for why.
+    environment:
+      ZEROSHIELD_EVIDENCE_BACKEND: minio
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: zeroshield
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-zeroshield123}
+      MINIO_SECURE: "false"
     volumes:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports

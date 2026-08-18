@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { Badge } from "@/components/ui";
 import { Button } from "@/components/ui/Button";
 import { studioApi } from "@/lib/api";
@@ -96,9 +95,19 @@ export function StepReview({ state }: StepProps) {
               {submitting ? "Submitting…" : "Submit for review"}
             </Button>
           ) : null}
-          <Link href={`/approvals/${created.version_id}`} className="inline-flex items-center rounded-lg border border-border px-3.5 py-2 text-sm font-medium hover:bg-surface-muted">
+          {/* A plain <a>, not next/link's <Link> - a client-side (RSC) soft navigation from
+          this wizard route to /approvals/[versionId] was observed, under next dev, to
+          resolve the target page's own server-side data fetch against a stale/incorrect
+          param and render its notFound() boundary, even though the version was already
+          committed and every other access path (hard navigation, a fresh tab, curl) reads
+          it back correctly. A full navigation sidesteps that RSC transition entirely -
+          reasonable anyway for "leave this multi-step wizard, go to a different area." */}
+          <a
+            href={`/approvals/${encodeURIComponent(created.version_id)}`}
+            className="inline-flex items-center rounded-lg border border-border px-3.5 py-2 text-sm font-medium hover:bg-surface-muted"
+          >
             View version
-          </Link>
+          </a>
         </div>
       </div>
     );

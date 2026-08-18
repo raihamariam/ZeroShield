@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Badge, Card, CardBody, CardHeader, EmptyState, ErrorState } from "@/components/ui";
 import { TriggerSyncButton } from "@/components/features/TriggerSyncButton";
-import { intelligenceApi } from "@/lib/api";
+import { authApi, intelligenceApi } from "@/lib/api";
 import { formatDateTime, titleCase } from "@/lib/utils/format";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +17,16 @@ async function settle<T>(p: Promise<T>) {
 }
 
 export default async function IntegrationsPage() {
-  const [sources, syncs] = await Promise.all([
+  const [sources, syncs, me] = await Promise.all([
     settle(intelligenceApi.listIntegrations()),
     settle(intelligenceApi.listSyncs({ limit: 20 })),
+    settle(authApi.me()),
   ]);
+  // POST /intelligence/sync requires RESEARCHER or ADMIN server-side (see
+  // require_role in zeroshield.api.routes.intelligence.submit_sync) - hiding
+  // it for VIEWER here is a UI convenience only, not the enforcement
+  // boundary, which stays server-side regardless of what this check does.
+  const canTriggerSync = me.ok && me.data.role !== "viewer";
 
   return (
     <div className="flex flex-col gap-6">
@@ -47,7 +53,7 @@ export default async function IntegrationsPage() {
               <CardBody className="flex flex-col gap-3 text-sm">
                 {source.detail ? <p className="text-text-muted">{source.detail}</p> : null}
                 <p className="text-xs text-text-muted">Checked {formatDateTime(source.checked_at)}</p>
-                <TriggerSyncButton source={source.source} />
+                {canTriggerSync ? <TriggerSyncButton source={source.source} /> : null}
               </CardBody>
             </Card>
           ))}

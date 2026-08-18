@@ -140,7 +140,7 @@ def test_run_experiment_event_sink_receives_preparing_even_when_denied(tmp_path:
     assert RunEventType.RUNNING_BASELINE not in events
 
 
-def test_default_evidence_repository_selects_minio_backend_when_configured(
+def test_resolve_evidence_repository_selects_minio_backend_when_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """ZEROSHIELD_EVIDENCE_BACKEND=minio must select MinioEvidenceRepository - the
@@ -161,17 +161,17 @@ def test_default_evidence_repository_selects_minio_backend_when_configured(
     monkeypatch.setenv("ZEROSHIELD_EVIDENCE_BACKEND", "minio")
     monkeypatch.setenv("MINIO_EVIDENCE_BUCKET", "custom-bucket")
 
-    repo = services._default_evidence_repository(tmp_path / "results")
+    repo = services.resolve_evidence_repository(tmp_path / "results")
     assert isinstance(repo, _FakeMinioRepo)
     assert created == {"client": "fake-client", "bucket": "custom-bucket"}
 
 
-def test_default_evidence_repository_defaults_to_local_bucket_name(
+def test_resolve_evidence_repository_defaults_to_local_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("MINIO_EVIDENCE_BUCKET", raising=False)
     monkeypatch.delenv("ZEROSHIELD_EVIDENCE_BACKEND", raising=False)
-    repo = services._default_evidence_repository(tmp_path / "results")
+    repo = services.resolve_evidence_repository(tmp_path / "results")
     assert isinstance(repo, LocalEvidenceRepository)
 
 
@@ -274,6 +274,65 @@ def test_load_latest_evidence_degrades_gracefully_when_dataset_missing(tmp_path:
     assert view is not None
     assert view.dataset_note is not None
     assert all(c.test_case is None for c in view.case_comparisons)
+
+
+def test_load_latest_evidence_reads_back_through_the_same_minio_backend_that_wrote_it(tmp_path: Path) -> None:
+    """The actual final-release gap: run_experiment(evidence_repository=minio)
+    followed by load_latest_evidence(evidence_repository=minio) must return
+    the same evidence - not silently fall back to (and fail to find
+    anything on) the local filesystem. Uses a fake, in-memory MinIO
+    backend (same shape as tests/security/test_minio_object_key_safety.py's)
+    so this needs no live MinIO server."""
+    from unittest.mock import MagicMock
+
+    from minio.error import S3Error
+
+    from zeroshield.repositories.minio_evidence_repository import MinioEvidenceRepository
+
+    class _FakeMinioBackend:
+        def __init__(self) -> None:
+            self.buckets: set[str] = set()
+            self.objects: dict[tuple[str, str], bytes] = {}
+
+        def bucket_exists(self, bucket: str) -> bool:
+            return bucket in self.buckets
+
+        def make_bucket(self, bucket: str) -> None:
+            self.buckets.add(bucket)
+
+        def put_object(self, bucket: str, key: str, data: object, length: int, **kwargs: object) -> None:
+            self.objects[(bucket, key)] = data.read()  # type: ignore[attr-defined]
+
+        def list_objects(self, bucket: str, prefix: str = "", **kwargs: object) -> list[str]:
+            return [key for (b, key) in self.objects if b == bucket and key.startswith(prefix)]
+
+        def get_object(self, bucket: str, key: str, **kwargs: object) -> MagicMock:
+            if (bucket, key) not in self.objects:
+                raise S3Error(
+                    response=MagicMock(), code="NoSuchKey", message="not found", resource=key,
+                    request_id="x", host_id="x", bucket_name=bucket, object_name=key,
+                )
+            response = MagicMock()
+            response.read.return_value = self.objects[(bucket, key)]
+            return response
+
+    repo = MinioEvidenceRepository(_FakeMinioBackend(), "zeroshield-evidence")  # type: ignore[arg-type]
+    experiment = _load(VPN_EXPERIMENT_PATH)
+    summary = services.run_experiment(
+        experiment, execution_context=ExecutionContext.LOCAL_UNIT_TEST,
+        results_root=tmp_path / "unused_results", evidence_repository=repo,
+    )
+    assert not (tmp_path / "unused_results").exists()  # nothing touched the local filesystem
+
+    view = services.load_latest_evidence("ZC-VPN-EXP-001", tmp_path / "unused_results", evidence_repository=repo)
+    assert view is not None
+    assert view.comparison.generated_at == summary.comparison_report.generated_at
+    assert view.baseline_manifest.run_id == summary.comparison_report.baseline_run_id
+    assert view.mitigation_manifest.run_id == summary.comparison_report.mitigation_run_id
+    assert len(view.case_comparisons) == 22
+    for case in view.case_comparisons:
+        assert case.baseline.case_id == case.case_id
+        assert case.mitigation.case_id == case.case_id
 
 
 def test_summarise_case_categories_matches_real_vpn_dataset(tmp_path: Path) -> None:

@@ -7,8 +7,8 @@ separate, explicit human actions (zeroshield.api.routes.revalidation) - see
 zeroshield.assurance.models.RevalidationCandidate's docstring for why
 nothing here ever queues a run itself.
 
-Detects all six trigger types listed in the phase brief directly from
-already-tracked state:
+Detects seven trigger types directly from already-tracked state (six from
+the phase brief, plus regression - final release gap-closure pass):
 
   - kev_state_change / epss_material_change: read straight from
     VulnerabilityHistoryEntry (zeroshield.intelligence.repository.
@@ -28,6 +28,16 @@ already-tracked state:
     the same structured-feature scoring GET /vulnerabilities/{cve}/
     correlations uses - never a fuzzy/AI match - bounded to candidates
     already in the same domain to keep each scan cheap and explainable.
+  - regression: NOT raised by scan() below - raised synchronously by
+    zeroshield.worker.processor._record_control_validation, immediately
+    after a completed run's ControlValidation is recorded, using the same
+    deterministic zeroshield.assurance.regression.detect_regressions()
+    GET /controls/{id}/effectiveness already exposes. Listed here because
+    it shares this module's create_candidate_if_new() dedup helper and the
+    same RevalidationCandidate/pending-review/human-approval contract -
+    the trigger site is different (write-time, not scan-time) because a
+    regression is a property of two specific consecutive validations, not
+    of external state a periodic scan re-checks.
 """
 
 import uuid
@@ -52,9 +62,13 @@ class ScanSummary:
     controls_scanned: int
 
 
-def _create_if_new(
+def create_candidate_if_new(
     repo: AssuranceRepository, *, control_id: str, experiment_id: str | None, trigger_type: str, trigger_detail: str
 ) -> RevalidationCandidate | None:
+    """Public (not scan()-only) - also called by
+    zeroshield.worker.processor._record_control_validation for the
+    regression trigger, so both write-time and scan-time triggers share one
+    dedup-on-(control_id, trigger_type) + create implementation."""
     if repo.find_pending_candidate(control_id=control_id, trigger_type=trigger_type):
         return None
     return repo.create_candidate(
@@ -86,7 +100,7 @@ def scan(
         # -- scheduled: staleness -------------------------------------------------
         age = now - latest.validated_at
         if age > staleness_window:
-            candidate = _create_if_new(
+            candidate = create_candidate_if_new(
                 assurance_repo, control_id=control.control_id, experiment_id=latest.experiment_id,
                 trigger_type=RevalidationTrigger.SCHEDULED,
                 trigger_detail=f"Last validated {age.days} days ago (window: {staleness_window.days} days).",
@@ -100,7 +114,7 @@ def scan(
         for version in versions:
             if version.version_id in validated_version_ids:
                 continue
-            candidate = _create_if_new(
+            candidate = create_candidate_if_new(
                 assurance_repo, control_id=control.control_id, experiment_id=None,
                 trigger_type=RevalidationTrigger.VERSION_CHANGE,
                 trigger_detail=f"Control version '{version.version_label}' has never been validated.",
@@ -116,7 +130,7 @@ def scan(
                 if entry.observed_at <= latest.validated_at:
                     continue
                 if entry.field == "kev_listed" and str(entry.new_value).strip().lower() == "true":
-                    candidate = _create_if_new(
+                    candidate = create_candidate_if_new(
                         assurance_repo, control_id=control.control_id, experiment_id=latest.experiment_id,
                         trigger_type=RevalidationTrigger.KEV_STATE_CHANGE,
                         trigger_detail=f"{cve_id} was added to CISA KEV on {entry.observed_at.date()}.",
@@ -130,7 +144,7 @@ def scan(
                     except ValueError:
                         continue
                     if old_v is not None and new_v is not None and abs(new_v - old_v) >= _EPSS_MATERIAL_CHANGE:
-                        candidate = _create_if_new(
+                        candidate = create_candidate_if_new(
                             assurance_repo, control_id=control.control_id, experiment_id=latest.experiment_id,
                             trigger_type=RevalidationTrigger.EPSS_MATERIAL_CHANGE,
                             trigger_detail=f"{cve_id} EPSS moved from {old_v:.2f} to {new_v:.2f} on {entry.observed_at.date()}.",
@@ -144,7 +158,7 @@ def scan(
                 changed_at = advisory.updated_at or advisory.published_at
                 if changed_at is None or changed_at <= latest.validated_at:
                     continue
-                candidate = _create_if_new(
+                candidate = create_candidate_if_new(
                     assurance_repo, control_id=control.control_id, experiment_id=latest.experiment_id,
                     trigger_type=RevalidationTrigger.ADVISORY_UPDATE,
                     trigger_detail=f"Vendor advisory '{advisory.advisory_id}' for {cve_id} was updated on {changed_at.date()}.",
@@ -164,7 +178,7 @@ def scan(
                 if v.cve_id != cve_id and v.cve_id not in related_cve_ids and v.last_updated_at > latest.validated_at
             ]
             for result in rank_correlations(subject, newly_observed, min_score=_NEW_RELATED_CVE_MIN_SCORE, limit=5):
-                candidate = _create_if_new(
+                candidate = create_candidate_if_new(
                     assurance_repo, control_id=control.control_id, experiment_id=latest.experiment_id,
                     trigger_type=RevalidationTrigger.NEW_RELATED_CVE,
                     trigger_detail=(

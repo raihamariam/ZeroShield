@@ -41,16 +41,23 @@ class ExperimentServiceError(Exception):
     """Raised for any service-layer failure that isn't already a core exception."""
 
 
-def _default_evidence_repository(results_root: Path) -> EvidenceRepository:
-    """Selects the evidence backend via ZEROSHIELD_EVIDENCE_BACKEND ("local",
-    the default, or "minio"). MinIO is the intended primary evidence store
-    for the containerised platform (docker-compose.yml sets this env var for
-    the worker/dashboard services) - local remains the default here so every
-    existing bare-Python/CI/test invocation, which has no MinIO server
-    running, keeps working unchanged, per V1 compatibility. The minio import
-    is local/guarded so the "storage" extra stays optional for callers that
-    never select it, consistent with zeroshield.repositories.__init__'s
-    stated policy.
+def resolve_evidence_repository(results_root: Path) -> EvidenceRepository:
+    """The one place ZEROSHIELD_EVIDENCE_BACKEND ("local", the default, or
+    "minio") is read - used consistently for both the write path
+    (run_experiment, below) and the read path (load_latest_evidence, below)
+    so whichever backend wrote a run's evidence is exactly the one that
+    reads it back (final release gap-closure pass - previously
+    load_latest_evidence always read through LocalEvidenceRepository
+    regardless of this setting, so a MinIO-backed write was invisible to
+    every verdict/results/evidence read route and the dashboard, even
+    though the write itself succeeded correctly). MinIO is the intended
+    primary evidence store for the containerised platform (docker-
+    compose.yml sets this env var for api/worker/dashboard) - local remains
+    the default here so every bare-Python/CI/test invocation, which has no
+    MinIO server running, keeps working unchanged, per V1 compatibility.
+    The minio import is local/guarded so the "storage" extra stays optional
+    for callers that never select it, consistent with
+    zeroshield.repositories.__init__'s stated policy.
     """
     backend = os.environ.get("ZEROSHIELD_EVIDENCE_BACKEND", "local").strip().lower()
     if backend == "minio":
@@ -106,7 +113,7 @@ def run_experiment(
     zeroshield.runners.PolicyRefusalError propagate unchanged - the safety
     gate inside ExperimentRunner.run() is never bypassed here.
 
-    evidence_repository defaults to _default_evidence_repository(results_root)
+    evidence_repository defaults to resolve_evidence_repository(results_root)
     (local, unless ZEROSHIELD_EVIDENCE_BACKEND=minio) - pass an explicit
     instance to override. event_sink, if given, is called with each
     RunEventType the underlying runner/orchestration actually reaches, in
@@ -129,7 +136,7 @@ def run_experiment(
     baseline_run_id = f"RUN-{stamp}01"
     mitigation_run_id = f"RUN-{stamp}02"
 
-    repo = evidence_repository or _default_evidence_repository(results_root)
+    repo = evidence_repository or resolve_evidence_repository(results_root)
     result = execute_and_generate_evidence(
         experiment,
         dataset_path,
@@ -178,45 +185,51 @@ class EvidenceView:
     dataset_note: str | None
 
 
-def _read_json_artefact(run_dir: Path, manifest: EvidenceManifest, name: str) -> Any:
-    path = run_dir / manifest.artefact_paths[name]
-    return json.loads(path.read_text(encoding="utf-8"))
+def _read_json_artefact(
+    repo: EvidenceRepository, experiment_id: str, run_id: str, manifest: EvidenceManifest, name: str
+) -> Any:
+    return json.loads(repo.load_artefact(experiment_id, run_id, str(manifest.artefact_paths[name])))
 
 
-def load_latest_evidence(experiment_id: str, results_root: Path) -> EvidenceView | None:
+def load_latest_evidence(
+    experiment_id: str, results_root: Path, evidence_repository: EvidenceRepository | None = None
+) -> EvidenceView | None:
     """Load the most recently generated comparison + both run manifests for an experiment.
 
     Reads only already-persisted evidence (comparison.json, manifest.json,
-    results.json, dataset_manifest.json) through the existing
-    LocalEvidenceRepository and each manifest's own artefact_paths. No metric
-    or safety decision is recomputed here; case-level detail is a plain join
-    of already-persisted CaseResult and TestCase records by case_id.
+    results.json, dataset_manifest.json) through an EvidenceRepository -
+    resolve_evidence_repository(results_root) by default (so this honours
+    ZEROSHIELD_EVIDENCE_BACKEND exactly like run_experiment's write path
+    does - final release gap-closure pass), or pass evidence_repository
+    explicitly to override. No metric or safety decision is recomputed
+    here; case-level detail is a plain join of already-persisted CaseResult
+    and TestCase records by case_id.
     """
-    comparison_path = results_root / experiment_id / "comparison.json"
-    if not comparison_path.is_file():
+    repo = evidence_repository or resolve_evidence_repository(results_root)
+    comparison = repo.load_comparison(experiment_id)
+    if comparison is None:
         return None
-    comparison = ComparisonReport.model_validate_json(comparison_path.read_text(encoding="utf-8"))
 
-    repo = LocalEvidenceRepository(results_root)
     baseline_manifest = repo.load_manifest(experiment_id, comparison.baseline_run_id)
     mitigation_manifest = repo.load_manifest(experiment_id, comparison.mitigation_run_id)
 
-    baseline_dir = results_root / experiment_id / comparison.baseline_run_id
-    mitigation_dir = results_root / experiment_id / comparison.mitigation_run_id
-
     baseline_results = [
         CaseResult.model_validate(r)
-        for r in _read_json_artefact(baseline_dir, baseline_manifest, "results")
+        for r in _read_json_artefact(repo, experiment_id, comparison.baseline_run_id, baseline_manifest, "results")
     ]
     mitigation_by_case = {
         r["case_id"]: CaseResult.model_validate(r)
-        for r in _read_json_artefact(mitigation_dir, mitigation_manifest, "results")
+        for r in _read_json_artefact(
+            repo, experiment_id, comparison.mitigation_run_id, mitigation_manifest, "results"
+        )
     }
 
     dataset_note: str | None = None
     test_cases_by_id: dict[str, TestCase] = {}
     try:
-        dataset_manifest_raw = _read_json_artefact(baseline_dir, baseline_manifest, "dataset_manifest")
+        dataset_manifest_raw = _read_json_artefact(
+            repo, experiment_id, comparison.baseline_run_id, baseline_manifest, "dataset_manifest"
+        )
         dataset_path = Path.cwd() / str(dataset_manifest_raw["dataset_path"])
         test_set, _ = load_test_set(dataset_path)
         test_cases_by_id = {tc.case_id: tc for tc in test_set.cases}

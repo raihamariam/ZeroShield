@@ -88,6 +88,35 @@ class MinioEvidenceRepository(EvidenceRepository):
         self._put(key, report.model_dump_json(indent=2).encode("utf-8"))
         return Path(self._bucket) / experiment_id / "comparison.json"
 
+    def load_comparison(self, experiment_id: str) -> ComparisonReport | None:
+        key = f"{experiment_id}/comparison.json"
+        try:
+            response = self._client.get_object(self._bucket, key)
+        except S3Error as exc:
+            if exc.code in _NOT_FOUND_CODES:
+                return None
+            raise
+        try:
+            data = response.read()
+        finally:
+            response.close()
+            response.release_conn()
+        return ComparisonReport.model_validate_json(data)
+
+    def load_artefact(self, experiment_id: str, run_id: str, filename: str) -> bytes:
+        key = self._object_key(experiment_id, run_id, filename)
+        try:
+            response = self._client.get_object(self._bucket, key)
+        except S3Error as exc:
+            if exc.code in _NOT_FOUND_CODES:
+                raise FileNotFoundError(f"no artefact at bucket '{self._bucket}' key '{key}'") from exc
+            raise
+        try:
+            return response.read()  # type: ignore[no-any-return]
+        finally:
+            response.close()
+            response.release_conn()
+
 
 def default_minio_client() -> Minio:
     """Builds a Minio client from environment variables, with local-dev defaults

@@ -38,8 +38,9 @@ import os
 import subprocess
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -409,110 +410,115 @@ def test_scenario_d_researcher_cannot_self_approve(admin_client: httpx.Client) -
 
 
 def test_scenario_e_regression_detection_and_revalidation(admin_client: httpx.Client) -> None:
-    """Regression detection compares two ControlValidations of the SAME
-    ControlVersion - and the deterministic execution engine cannot itself
-    produce two different outcomes for the same version (same dataset +
-    same strategy = same result, by design), so there is no live/organic
-    path that makes a real re-run "degrade." The pre-existing unit test
-    (tests/unit/api/test_controls.py) already demonstrates this the only
-    way it can be demonstrated: two directly-seeded ControlValidation rows.
-    This test does the same thing here, but against the REAL live API +
-    REAL Postgres, not TestClient/SQLite - proving the deterministic
-    detection logic (zeroshield.assurance.regression) and the
-    GET /controls/{id}/effectiveness route both work correctly end-to-end.
+    """A REAL deterministic control-effectiveness degradation must produce
+    a REAL regression-triggered RevalidationCandidate - the actual product
+    connection (zeroshield.worker.processor.
+    record_control_validation_and_check_regression), not an unrelated
+    trigger used as a stand-in. This calls that exact function directly
+    (against the live Postgres, through the real AssuranceRepository) with
+    two comparison reports - healthy, then degraded - the same shape
+    worker.processor builds from a real ComparisonReport after a completed
+    run. No KEV/EPSS/advisory data is touched anywhere in this test.
 
-    Separately - and this is a genuine finding from this audit, not
-    something being papered over - NO revalidation trigger type in
-    zeroshield.assurance.revalidation.scan() is tied to a detected
-    regression; the six triggers are staleness, an unvalidated new control
-    version, KEV state change, material EPSS change, an advisory update,
-    and a newly-correlated CVE. So this test demonstrates the revalidation
-    candidate half via a real, independent, correctly-wired trigger
-    (KEV_STATE_CHANGE) instead of implying a causal link to the regression
-    that does not exist in the current code.
+    The execution engine itself can't organically produce two different
+    outcomes for the same experiment version (same dataset + same strategy
+    = same result, by design - see zeroshield.orchestration), so "a real
+    validation, twice, with different comparison metrics" is the correct
+    way to exercise this end to end without faking the detection itself:
+    detect_regressions() and create_candidate_if_new() below are the exact,
+    unmodified functions the worker calls after a genuine run.
     """
     from zeroshield.assurance.control_binding import bind_experiment_to_control
-    from zeroshield.assurance.models import ControlValidation
     from zeroshield.assurance.repository import AssuranceRepository
     from zeroshield.db.session import build_engine, build_sessionmaker
     from zeroshield.experiments.discovery import find_experiment
-    from zeroshield.intelligence.repository import VulnerabilityRepository
-    from zeroshield.models.vulnerability import Vulnerability, VulnerabilityHistoryEntry
+    from zeroshield.models import ComparisonReport, ExperimentMetrics
+    from zeroshield.worker.processor import record_control_validation_and_check_regression
 
     engine = build_engine()
     session_factory = build_sessionmaker(engine)
     assurance_repo = AssuranceRepository(session_factory)
-    vuln_repo = VulnerabilityRepository(session_factory)
 
-    experiment = find_experiment(REPO_ROOT / "experiments", "ZC-VPN-EXP-001")
-    assert experiment is not None
+    base_experiment = find_experiment(REPO_ROOT / "experiments", "ZC-VPN-EXP-001")
+    assert base_experiment is not None
+    # A run-unique mitigation_strategy id, not the bundled experiment's real one - Scenario
+    # A/B/D's Studio-run experiments resolve to that same real control (domain +
+    # mitigation_strategy_id, see bind_experiment_to_control), so reusing it here would let
+    # their genuine validation history leak into this test's own before/after comparison
+    # whenever the full suite runs together. get_or_create_control falls back to
+    # template_id="unknown" for this synthetic strategy id, which is fine - control-version
+    # records are always creatable, real templates just don't need to know about it.
+    experiment = base_experiment.model_copy(
+        update={"mitigation_strategy": f"{base_experiment.mitigation_strategy}_e2e_{RUN_TAG_NUM}"}
+    )
     binding = bind_experiment_to_control(assurance_repo, experiment)
 
     now = datetime.now(UTC)
-    healthy = ControlValidation(
-        validation_id=f"VAL-e2e-{RUN_TAG}-1", control_id=binding.control.control_id,
-        version_id=binding.version.version_id, experiment_id=experiment.experiment_id,
-        baseline_run_id=f"RUN-e2e-{RUN_TAG}-1a", mitigation_run_id=f"RUN-e2e-{RUN_TAG}-1b",
-        total_cases=20, block_rate_improvement=0.60, false_positive_rate=0.02,
-        false_negative_rate=0.02, valid_acceptance_rate=0.95, parser_reach_rate=0.05,
-        latency_overhead_ms=5.0, verdict_label="effective", validated_at=now - timedelta(days=1),
-    )
-    degraded = ControlValidation(
-        validation_id=f"VAL-e2e-{RUN_TAG}-2", control_id=binding.control.control_id,
-        version_id=binding.version.version_id, experiment_id=experiment.experiment_id,
-        baseline_run_id=f"RUN-e2e-{RUN_TAG}-2a", mitigation_run_id=f"RUN-e2e-{RUN_TAG}-2b",
-        total_cases=20, block_rate_improvement=0.30, false_positive_rate=0.02,
-        false_negative_rate=0.02, valid_acceptance_rate=0.95, parser_reach_rate=0.05,
-        latency_overhead_ms=5.0, verdict_label="partially_effective", validated_at=now,
-    )
-    assurance_repo.record_validation(healthy)
-    assurance_repo.record_validation(degraded)
 
+    def _metrics(run_id: str, block_rate: float) -> ExperimentMetrics:
+        return ExperimentMetrics(
+            run_id=run_id, processing_success_rate=1.0, block_rate=block_rate, valid_acceptance_rate=0.95,
+            false_positive_rate=0.02, false_negative_rate=0.02, parser_reach_rate=0.05, mean_latency_ms=5.0,
+            log_completeness_rate=1.0, calculated_at=now, calculation_version="1.0.0",
+        )
+
+    def _record(run_suffix: str, block_rate_improvement: float) -> None:
+        baseline_run_id, mitigation_run_id = f"RUN-{RUN_TAG_NUM}{run_suffix}1", f"RUN-{RUN_TAG_NUM}{run_suffix}2"
+        comparison = ComparisonReport(
+            experiment_id=experiment.experiment_id, baseline_run_id=baseline_run_id,
+            mitigation_run_id=mitigation_run_id, total_cases=20,
+            baseline_metrics=_metrics(baseline_run_id, block_rate=0.0),
+            mitigation_metrics=_metrics(mitigation_run_id, block_rate=block_rate_improvement),
+            block_rate_improvement=block_rate_improvement, latency_overhead_ms=5.0,
+            limitations=["controlled fixture, not a real run"], generated_at=now,
+        )
+        record_control_validation_and_check_regression(
+            assurance_repo, binding=binding, experiment=experiment, summary=SimpleNamespace(comparison_report=comparison)
+        )
+
+    _record("1", 0.90)  # healthy validation - establishes a baseline to regress from
+    _record("2", 0.30)  # 0.60 drop >> the 0.10 max-tolerated-drop threshold: a real regression
+
+    # -- the regression itself, via the live API (same route Scenario A/B/D use) --
     effectiveness = admin_client.get(f"/controls/{binding.control.control_id}/effectiveness")
     assert effectiveness.status_code == 200, effectiveness.text
     body = effectiveness.json()
     assert body["regression"] is not None, f"expected a detected regression, got: {body}"
     assert any("block_rate_improvement" in r for r in body["regression"]["reasons"]), body["regression"]
 
-    # Independent, real KEV_STATE_CHANGE trigger (not causally tied to the
-    # regression above - see docstring).
-    cve_id = experiment.related_cves[0].cve_id
-    seed_vuln = vuln_repo.get_vulnerability(cve_id)
-    if seed_vuln is None:
-        vuln_repo.upsert_vulnerability(
-            Vulnerability(cve_id=cve_id, kev_listed=False, first_seen_at=now, last_updated_at=now)
-        )
-    vuln_repo.append_history(
-        [
-            VulnerabilityHistoryEntry(
-                cve_id=cve_id, source="cisa_kev", field="kev_listed",
-                old_value="false", new_value="true", observed_at=now + timedelta(minutes=1),
-            )
-        ]
-    )
-
-    scan_resp = admin_client.post("/revalidation/scan")
-    assert scan_resp.status_code == 200, scan_resp.text
-
-    # find_pending_candidate() correctly dedupes on (control_id, trigger_type) -
-    # a rerun of this test against a stack that already has a pending
-    # kev_state_change candidate for this control (from an earlier run of
-    # this same suite, or genuine prior use) will see candidates_created==[]
-    # for this scan call, which is CORRECT behaviour, not a failure - so the
-    # real assertion is "a pending kev_state_change candidate exists for
-    # this control" via GET /revalidation, not "this specific call created
-    # one".
-    listed = admin_client.get(
-        "/revalidation", params={"status": "pending"}
-    )
+    # -- the regression-triggered revalidation candidate it must have created --
+    listed = admin_client.get("/revalidation", params={"status": "pending"})
     assert listed.status_code == 200, listed.text
-    kev_candidates = [
+    regression_candidates = [
         c for c in listed.json()["candidates"]
-        if c["trigger_type"] == "kev_state_change" and c["control_id"] == binding.control.control_id
+        if c["trigger_type"] == "regression" and c["control_id"] == binding.control.control_id
     ]
-    assert kev_candidates, (
-        f"expected a pending kev_state_change candidate for {binding.control.control_id}, "
-        f"got: {listed.json()}"
+    assert regression_candidates, (
+        f"expected a pending regression-triggered revalidation candidate for "
+        f"{binding.control.control_id}, got: {listed.json()}"
+    )
+    candidate = regression_candidates[0]
+    assert candidate["status"] == "pending"
+    assert "block_rate_improvement" in candidate["trigger_detail"]
+
+    # -- pending, never auto-executed - approval is a separate human action --
+    detail = admin_client.get(f"/revalidation/{candidate['candidate_id']}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["status"] == "pending"
+    assert detail.json()["reviewed_by"] is None
+
+    # -- dedup: a second regression against the same control does not create
+    # a second pending candidate (create_candidate_if_new's
+    # find_pending_candidate check, exercised live) --
+    _record("3", 0.10)  # still bad relative to run 2 - another real regression
+    listed_again = admin_client.get("/revalidation", params={"status": "pending"})
+    assert listed_again.status_code == 200, listed_again.text
+    regression_candidates_again = [
+        c for c in listed_again.json()["candidates"]
+        if c["trigger_type"] == "regression" and c["control_id"] == binding.control.control_id
+    ]
+    assert len(regression_candidates_again) == 1, (
+        f"expected the regression candidate to stay deduplicated, got: {regression_candidates_again}"
     )
 
 

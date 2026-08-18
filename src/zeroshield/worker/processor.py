@@ -41,36 +41,84 @@ def _record_control_validation(assurance_repository: object, experiment: Any, su
     import graph when no assurance_repository is configured."""
     try:
         from zeroshield.assurance.control_binding import bind_experiment_to_control
-        from zeroshield.assurance.models import ControlValidation
-        from zeroshield.verdict import compute_verdict
 
-        comparison = summary.comparison_report
         binding = bind_experiment_to_control(assurance_repository, experiment)  # type: ignore[arg-type]
-        verdict = compute_verdict(comparison)
-        m = comparison.mitigation_metrics
-        assurance_repository.record_validation(  # type: ignore[attr-defined]
-            ControlValidation(
-                validation_id=f"VAL-{uuid.uuid4().hex}",
-                control_id=binding.control.control_id,
-                version_id=binding.version.version_id,
-                experiment_id=experiment.experiment_id,
-                baseline_run_id=comparison.baseline_run_id,
-                mitigation_run_id=comparison.mitigation_run_id,
-                total_cases=comparison.total_cases,
-                block_rate_improvement=comparison.block_rate_improvement,
-                false_positive_rate=m.false_positive_rate,
-                false_negative_rate=m.false_negative_rate,
-                valid_acceptance_rate=m.valid_acceptance_rate,
-                parser_reach_rate=m.parser_reach_rate,
-                latency_overhead_ms=comparison.latency_overhead_ms,
-                verdict_label=verdict.label.value,
-                validated_at=datetime.now(UTC),
-            )
-        )
+        record_control_validation_and_check_regression(assurance_repository, binding=binding, experiment=experiment, summary=summary)
     except Exception:
         logger.warning(
             "failed to record control validation for experiment %s", experiment.experiment_id, exc_info=True
         )
+
+
+def record_control_validation_and_check_regression(
+    assurance_repository: Any, *, binding: Any, experiment: Any, summary: Any
+) -> None:
+    """Records the new ControlValidation, then - final release gap-closure
+    pass - immediately checks it against the previous validation of the
+    *same* ControlVersion (never blended across versions, same comparability
+    rule GET /controls/{id}/effectiveness already enforces) using the same
+    deterministic zeroshield.assurance.regression.detect_regressions() that
+    route uses. A confirmed regression raises a pending
+    RevalidationCandidate (trigger_type=RevalidationTrigger.REGRESSION),
+    deduped via create_candidate_if_new() exactly like every other trigger -
+    never more than one pending regression candidate per control at a time.
+    This function never executes or queues a run - a candidate only ever
+    reaches pending status, same as every other trigger; a human approves
+    it through the existing revalidation UI, which submits an ordinary run
+    through the ordinary Experiments/Runs path. AI has no role in this
+    function at all - regression detection and candidate creation are both
+    100% deterministic here, matching Step 10's "AI may explain, never
+    decide" boundary."""
+    from zeroshield.assurance.models import ControlValidation, RevalidationTrigger
+    from zeroshield.assurance.regression import detect_regressions
+    from zeroshield.assurance.revalidation import create_candidate_if_new
+    from zeroshield.verdict import compute_verdict
+
+    comparison = summary.comparison_report
+    verdict = compute_verdict(comparison)
+    m = comparison.mitigation_metrics
+    new_validation = assurance_repository.record_validation(
+        ControlValidation(
+            validation_id=f"VAL-{uuid.uuid4().hex}",
+            control_id=binding.control.control_id,
+            version_id=binding.version.version_id,
+            experiment_id=experiment.experiment_id,
+            baseline_run_id=comparison.baseline_run_id,
+            mitigation_run_id=comparison.mitigation_run_id,
+            total_cases=comparison.total_cases,
+            block_rate_improvement=comparison.block_rate_improvement,
+            false_positive_rate=m.false_positive_rate,
+            false_negative_rate=m.false_negative_rate,
+            valid_acceptance_rate=m.valid_acceptance_rate,
+            parser_reach_rate=m.parser_reach_rate,
+            latency_overhead_ms=comparison.latency_overhead_ms,
+            verdict_label=verdict.label.value,
+            validated_at=datetime.now(UTC),
+        )
+    )
+
+    same_version_validations = [
+        v for v in assurance_repository.list_validations(binding.control.control_id)
+        if v.version_id == new_validation.version_id
+    ]
+    if len(same_version_validations) < 2:
+        return  # first validation of this version - nothing to compare against yet
+    result = detect_regressions(same_version_validations[-2], same_version_validations[-1])
+    if not result.is_regression:
+        return
+
+    detail = (
+        f"Deterministic regression detected for {binding.control.control_id} "
+        f"({binding.version.version_label}) at validation {new_validation.validation_id}: "
+        + "; ".join(result.reasons)
+    )
+    create_candidate_if_new(
+        assurance_repository,
+        control_id=binding.control.control_id,
+        experiment_id=experiment.experiment_id,
+        trigger_type=RevalidationTrigger.REGRESSION,
+        trigger_detail=detail,
+    )
 
 _TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED, JobStatus.DENIED, JobStatus.FAILED})
 

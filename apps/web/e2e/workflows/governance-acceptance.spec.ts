@@ -55,14 +55,13 @@ test.describe("Governance 2 - RBAC is enforced, not just hidden, for a VIEWER", 
     await viewerPage.goto("/users");
     await expect(viewerPage.getByRole("button", { name: "Create user" })).toHaveCount(0);
 
-    // Real finding from the final release verification pass, not glossed
-    // over: unlike the Users page above, the Integrations page's "Trigger
-    // sync" button is NOT role-gated client-side - a VIEWER sees it,
-    // clicking it 403s (proven by the direct-API assertion below, and by
-    // tests/security/test_rbac_hardening.py's POST /intelligence/sync ->
-    // VIEWER -> 403 coverage in the backend suite). A cosmetic UI polish
-    // item, not a security gap - server-side RBAC is the actual boundary
-    // either way (see docs/SECURITY.md §2). Tracked, not silently hidden.
+    // Integrations page's "Trigger sync" button is also hidden for VIEWER
+    // now (final fix pass) - server-side RBAC (POST /intelligence/sync ->
+    // RESEARCHER/ADMIN only) remains the actual enforcement boundary either
+    // way; see tests/security/test_rbac_hardening.py's VIEWER -> 403
+    // coverage and the direct-API assertion below.
+    await viewerPage.goto("/integrations");
+    await expect(viewerPage.getByRole("button", { name: "Trigger sync" })).toHaveCount(0);
 
     // Belt-and-braces: even a direct, script-issued request (bypassing any
     // client-side hiding entirely) must still be rejected server-side.
@@ -95,10 +94,21 @@ test.describe("Governance 3 - self-approval is blocked; a different REVIEWER can
     await researcherPage.getByRole("button", { name: /VPN|Telecom/ }).first().click();
     await researcherPage.getByRole("button", { name: "Look up & add" }).click();
     await researcherPage.getByLabel("Trust boundary").fill("pre-authentication network boundary");
+    // Not { exact: true }: FormField renders required labels as e.g. "Root cause *" (a
+    // visible, aria-hidden asterisk) - getByLabel matches the label's raw text content,
+    // which includes that asterisk, so an exact match against "Root cause" alone can
+    // never resolve. Each of these is the only element with this label mounted at its
+    // step, so the plain substring match stays unambiguous.
+    await researcherPage.getByLabel("Root cause").selectOption({ index: 1 });
     await researcherPage.getByLabel("Vendor mitigation").fill("Vendor ships a rate limiter.");
     await researcherPage.getByLabel("Mitigation gap").fill("Rate limiter does not validate request shape.");
     await researcherPage.getByLabel("Source URLs (one per line)").fill("https://example.com/advisory");
     await researcherPage.getByRole("button", { name: "Next", exact: true }).click();
+    // Domain pack/template are not auto-selected (StepDomainTemplate always requires an
+    // explicit click) - each domain has exactly one registered pack and that pack exactly
+    // one template, so picking the first (only) option of each is deterministic.
+    await researcherPage.getByRole("button", { name: /Domain Pack/ }).first().click();
+    await researcherPage.locator("h2:has-text('Validation template') + div button").first().click();
     await researcherPage.getByRole("button", { name: "Next", exact: true }).click();
     await researcherPage.getByLabel("Title").fill("Governance 3 self-approval-block check");
     await researcherPage.getByLabel("Description").fill("Created by governance-acceptance.spec.ts Governance 3.");
@@ -106,18 +116,31 @@ test.describe("Governance 3 - self-approval is blocked; a different REVIEWER can
     await researcherPage.getByRole("button", { name: "Preview dataset" }).click();
     await expect(researcherPage.getByText(/cases · sha256/)).toBeVisible();
     await researcherPage.getByRole("button", { name: "Next", exact: true }).click();
+    // Metrics to collect has no default selection either - stepMetricsErrors requires at
+    // least one, and StepStrategyMetrics never pre-selects any. Click the first.
+    await researcherPage.locator("h2:has-text('Metrics to collect') + div button").first().click();
     await researcherPage.getByRole("button", { name: "Next", exact: true }).click();
     await researcherPage.getByLabel("Failure pattern").selectOption({ index: 1 });
-    await researcherPage.getByLabel("Root cause", { exact: true }).selectOption({ index: 1 });
-    await researcherPage.getByLabel("Vendor mitigation", { exact: true }).fill("Vendor ships a rate limiter.");
-    await researcherPage.getByLabel("Mitigation gap", { exact: true }).fill("Rate limiter does not validate request shape.");
+    await researcherPage.getByLabel("Root cause").selectOption({ index: 1 });
+    await researcherPage.getByLabel("Vendor mitigation").fill("Vendor ships a rate limiter.");
+    await researcherPage.getByLabel("Mitigation gap").fill("Rate limiter does not validate request shape.");
     await researcherPage.getByLabel("Research question").fill("Is self-approval blocked for a non-ADMIN creator?");
     await researcherPage.getByLabel("Hypothesis").fill("The REVIEWER role check rejects the creator's own approval.");
     await researcherPage.getByRole("button", { name: "Next", exact: true }).click();
     await researcherPage.getByRole("button", { name: "Save draft" }).click();
     await expect(researcherPage.getByText(/Draft saved:/)).toBeVisible();
     await researcherPage.getByRole("button", { name: "Submit for review" }).click();
-    await researcherPage.getByRole("link", { name: "View version" }).click();
+    // page.goto(href), not .click(), wrapped in toPass(): see full-lifecycle.spec.ts's
+    // identical comment - a simulated click on this plain <a href> intermittently 404s
+    // the exact same URL that goto() and a fresh tab render correctly (no app code in the
+    // click path at all), and under sustained sequential load `next dev` can itself drop
+    // an RSC stream mid-render and needs a retried navigation - real dev-server
+    // infrastructure flakiness, not a weakened assertion.
+    const viewVersionHref = await researcherPage.getByRole("link", { name: "View version" }).getAttribute("href");
+    await expect(async () => {
+      await researcherPage.goto(viewVersionHref!);
+      await expect(researcherPage.getByRole("button", { name: "Start review" })).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 60_000 });
     const approvalUrl = researcherPage.url();
 
     await researcherPage.getByRole("button", { name: "Start review" }).click();

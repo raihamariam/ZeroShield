@@ -2,10 +2,12 @@
 #
 # Multi-stage build producing Next.js's "standalone" output (next.config.ts) - a
 # minimal, self-contained server bundle, so the runtime stage never needs the full
-# node_modules tree. The backend base URL is read from API_BASE_URL at container
-# start (see next.config.ts / src/lib/api/client.ts), never baked into the image -
-# the same image works against any ZeroShield API instance docker-compose.yml points
-# it at.
+# node_modules tree. src/lib/api/client.ts's server-side fetches read API_BASE_URL
+# at request time, so those follow whatever docker-compose.yml sets for the
+# container. next.config.ts's rewrites() (the browser-facing same-origin "/api/*"
+# proxy) is different: Next.js resolves rewrite destinations at `next build` time,
+# so API_BASE_URL must also be passed as a build ARG (below), matching the
+# container's runtime value - see docker-compose.yml's `web` service for why.
 
 FROM node:22-slim AS deps
 WORKDIR /app
@@ -14,6 +16,13 @@ RUN npm ci
 
 FROM node:22-slim AS builder
 WORKDIR /app
+# next.config.ts's rewrites() reads API_BASE_URL at config-load time, which for
+# `next build` happens during THIS build step - a runtime-only env var (as
+# docker-compose.yml sets for the container) is too late, since by then the
+# rewrite destination is already baked into .next/routes-manifest.json. Must be
+# passed as a build arg too, matching the same value the container gets at runtime.
+ARG API_BASE_URL=http://api:8000
+ENV API_BASE_URL=$API_BASE_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

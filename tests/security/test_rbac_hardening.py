@@ -22,8 +22,8 @@ def _as(role: Role, username: str = "test-user"):
 
 # -- VIEWER blocked from every mutating route -----------------------------------
 
-# (method, path, json_body) - every route this session's Phase 6 rollout
-# gated behind RESEARCHER/REVIEWER/ADMIN. A VIEWER must get exactly 403 on
+# (method, path, json_body) - every route Phase 6's RBAC rollout gated
+# behind RESEARCHER/REVIEWER/ADMIN. A VIEWER must get exactly 403 on
 # every one of these, never a 200/201/202/404-that-implies-it-got-past-auth.
 MUTATING_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/users", {"username": "x", "password": "whatever-secure-1", "role": "viewer"}),

@@ -25,7 +25,7 @@ Two tiers, gated in `playwright.config.ts`:
     AI-disabled, MinIO-failure, worker-restart) lives outside Playwright, in
     `tests/integration/test_v2_release_acceptance.py` - several of those scenarios need
     infrastructure manipulation (stopping MinIO, restarting the worker container) that a
-    browser test isn't a natural fit for. See [`docs/TESTING.md`](../../../docs/TESTING.md).
+    browser test isn't a natural fit for.
 
   Needs the full stack running (`docker compose up` from the repo root) with at least one
   ingested, supported-domain CVE in the priority queue, and one bootstrap ADMIN account

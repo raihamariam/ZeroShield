@@ -18,15 +18,23 @@ overleaf_exports/*
 jobs/*
 !jobs/.gitkeep
 
-# Local Claude Code tooling (session-local, not project source)
+# Local editor/agent tooling (machine-local, not project source)
 .claude/
 .agents/
 commands.txt
 
-# Real local environment files (final release verification fix) - .env.example
-# is the only env file meant to be tracked; anything without the .example
-# suffix is assumed to carry real local secrets (POSTGRES_PASSWORD,
-# MINIO_ROOT_PASSWORD, GRAFANA_ADMIN_PASSWORD, ANTHROPIC_API_KEY, ...).
+# Real local environment files - .env.example is the only env file meant to
+# be tracked; anything without the .example suffix is assumed to carry real
+# local secrets (POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD, GRAFANA_ADMIN_PASSWORD,
+# ANTHROPIC_API_KEY, ...).
 .env
 .env.*
 !.env.example
+
+# Reference/planning documents kept locally only, not published on GitHub
+docs/
+*.docx
+*.pdf
+*.xlsx
+srs_full_text.txt
+srs_image*.png

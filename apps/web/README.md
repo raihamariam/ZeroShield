@@ -65,6 +65,5 @@ See `e2e/README.md` for what each Playwright tier covers.
 A few UI requirements exceed what the current FastAPI schemas return (draft
 experiment-version content pre-approval, per-CVE affected products, result
 case-category breakdowns, a generator config schema endpoint). Each affected page says
-so explicitly rather than fabricating the missing data - see the "Phase 4 API gaps"
-note left in this session's memory, or grep the codebase for "not exposed" /
-"not yet available".
+so explicitly rather than fabricating the missing data - grep the codebase for
+"not exposed" / "not yet available" to find every affected spot.

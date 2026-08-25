@@ -11,8 +11,8 @@ is just the lowercased domain (zeroshield.domain_packs' pack_id convention
 registered template in that pack whose allow-listed mitigation strategies
 include this experiment's - a real, deterministic lookup against the
 existing template registry, never a guess. Falls back to "unknown" only if
-no matching template is registered (e.g. a future domain pack this session
-never templated), so a control-version record is always creatable."""
+no matching template is registered (e.g. a future domain pack that has no
+template yet), so a control-version record is always creatable."""
 
 from dataclasses import dataclass
 

@@ -1,350 +1,257 @@
 # ZeroShield
 
-A Sandbox-Based Validation Framework for Zero-Click Vulnerability Mitigations — a defensive R&D prototype that converts selected VPN and Telecommunications zero-click CVE research into safe, reproducible, synthetic mitigation-validation experiments.
+A sandbox-based validation platform for zero-click vulnerability mitigations. ZeroShield takes a documented VPN or Telecom zero-click CVE failure pattern, runs the **same synthetic test set** through a **baseline** (vulnerable-shaped) processing strategy and a **mitigation** (hardened) processing strategy, and produces a factual, hash-verified evidence bundle comparing the two. It never targets real systems and never uses live exploit payloads — every dataset is synthetic and generated deterministically.
 
-Status: **Milestones 1–30 complete** — the core validation engine (experiment models, safety policy, VPN/Telecom baseline and mitigation strategies, metrics, evidence generation, Overleaf export), a first-release command-line interface, a Streamlit demonstration dashboard, a FastAPI REST interface, a Docker image/Compose setup, asynchronous experiment execution via RabbitMQ and a worker process, an optional S3-compatible (MinIO) evidence storage backend alongside the default local one, Prometheus/Grafana operational monitoring, end-to-end tests exercising the CLI, dashboard, and API/worker through their real interface boundaries, a dedicated security/failure-path test suite (path traversal, evidence immutability, malformed-queue-message robustness, dataset secret scanning, a static dangerous-primitive tripwire, and a dependency vulnerability scan), a documentation reference set (`docs/`), architecture documentation with diagrams, a guided demonstration workflow, and a final requirement-by-requirement traceability and SRS compliance review. This completes the SRS's optional-infrastructure list (Docker, RabbitMQ, MinIO, Prometheus, Grafana). Milestone 24 was folded into Milestone 30 (evidence repository/retention policy, resolved as D-05 — see [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md)). The compliance review found the engineering baseline essentially complete, with the remaining open items (two experiments still `draft`/unapproved, several §17 open decisions) being supervisor decisions this solo placement execution has no live reviewer to close — documented explicitly rather than glossed over.
+On top of that core validation engine sits a full platform: automated CVE intelligence ingestion, an experiment-authoring studio with an approval workflow, a sandboxed executor, a deterministic verdict engine, an optional advisory-only AI research assistant, authentication/RBAC, an audit trail, and operational monitoring.
 
-Authoritative requirements source: `ZC_Mitigation_Validation_Framework_SRS.docx` (draft, pending supervisor approval).
+Detailed internal reference material (architecture deep-dive, requirements traceability, deployment runbooks, security audit notes) is kept in a local `docs/` folder that isn't published in this repository — everything needed to run and understand the system is in this README.
 
-**V2 status:** ZeroShield is evolving into "ZeroShield — Continuous Mitigation Assurance Platform" per `ZeroShield Improvement Plan.docx`'s six-phase roadmap, preserving and extending the V1 core above rather than replacing it.
+## Contents
 
-- **Phase 1 (Platform Foundation) is complete**: PostgreSQL + Alembic migrations for a rich, auditable run-lifecycle event trail (`zeroshield.repositories.PostgresRunRepository`, additive to the existing file-based job status), and MinIO as the default evidence backend for the containerised (Docker Compose) deployment. Both are optional infrastructure — every existing CLI/dashboard/bare-Python/test workflow above is unchanged and requires neither. See [`docs/ARCHITECTURE.md` §6a](docs/ARCHITECTURE.md#6a-v2-platform-foundation-postgresql-run-lifecycle-system-of-record).
-- **Phase 2 (Threat Intelligence & Prioritisation) is complete**: automated NVD/CISA KEV/EPSS/GitHub Advisory ingestion, deduplication, field-level history, and a deterministic, explainable ZeroShield Validation Priority identifying VPN/Telecom `ValidationCandidate`s — replacing the manual CVE-to-Excel-to-experiment workflow (the workbook remains importable, never auto-executes anything). No AI. New endpoints: `GET /vulnerabilities`, `GET /priority-queue`, `GET /sources`/`/integrations`, `POST /intelligence/sync`. Requires `DATABASE_URL` (PostgreSQL is the system of record here, not optional). See [`docs/ARCHITECTURE.md` §6b](docs/ARCHITECTURE.md#6b-v2-phase-2-threat-intelligence--prioritisation) and [`docs/HANDOVER.md`](docs/HANDOVER.md#threat-intelligence--prioritisation-v2-phase-2).
-- **Phase 3 (Advanced Validation Platform) is complete**: a Domain Pack framework (VPN/Telecom, migrating the existing strategies unchanged), versioned Validation Templates, deterministic synthetic dataset generators, an Experiment Studio backend that replaces hand-authoring experiment JSON, an explicit DRAFT→READY_FOR_REVIEW→UNDER_REVIEW→APPROVED/REJECTED→RETIRED approval workflow (never bypassing `SafetyPolicy`), a strengthened local `SandboxExecutor` (allow-list, timeout, network guard, resource limits — not Kubernetes), and a deterministic, threshold-based verdict engine. New endpoints: `GET /domain-packs`, `POST /experiment-versions`, the approval-transition routes, `POST /experiment-versions/{id}/runs`, `GET /experiments/{id}/verdict`. No AI. See [`docs/ARCHITECTURE.md` §6c](docs/ARCHITECTURE.md#6c-v2-phase-3-advanced-validation-platform) and [`docs/HANDOVER.md`](docs/HANDOVER.md#advanced-validation-platform-v2-phase-3).
-- **Phase 4 (Professional Web Application) is complete**: a Next.js/React/TypeScript app (`apps/web/`) is now the primary ZeroShield interface, consuming FastAPI exclusively (never Postgres/MinIO/RabbitMQ/Python directly). Mission Control dashboard, Threat Intelligence (searchable vulnerabilities, priority queue), a multi-step Experiment Studio wizard (CVE → domain pack → template → dataset config → metrics → narrative → draft/submit), Approvals, a live SSE-driven Runs view, per-experiment Results/Verdict, an Evidence Vault, and System/Integrations/Health views. The Streamlit dashboard (below) is kept as a legacy, read-only view — its run-execution path is disabled so it can't bypass the web app's approval-gated workflow. Runs alongside the rest of the stack via `docker compose up` (port 3001) or standalone (`cd apps/web && npm run dev`). See [`apps/web/README.md`](apps/web/README.md).
-- **Phase 5 (AI & Continuous Assurance) is complete**: a strictly advisory AI Research Analyst (failure-pattern classification, mitigation-gap analysis, similarity narration grounded in deterministic CVE correlation, template recommendation, draft-experiment suggestions — every output persisted as an `AIAssessmentRecord` with `reviewed=False` until a human reviews it, never able to approve/execute/alter anything), an asset inventory, a Control/ControlVersion/ControlValidation model with effectiveness aggregation, deterministic regression detection, and a human-reviewed revalidation queue (six deterministic trigger types). No AI required — every route still works, just answering `503 ai_unavailable`, with `AI_PROVIDER` unset. See [`docs/ARCHITECTURE.md` §6d](docs/ARCHITECTURE.md#6d-v2-phase-5-ai--continuous-assurance) and [`docs/HANDOVER.md`](docs/HANDOVER.md#ai-research-analyst--continuous-assurance-v2-phase-5).
-- **Phase 6 (Hardening & Final Local V2 Release) is complete — the final implementation phase**: local authentication (Argon2id, opaque sessions, account lockout), role-based access control (`viewer`/`researcher`/`reviewer`/`admin`, no implicit hierarchy, enforced server-side on every route), self-approval blocking (a REVIEWER/RESEARCHER can never approve their own experiment version — ADMIN is an explicit override), an immutable audit trail, an extended security test suite, Prometheus/structured-JSON-logging/OpenTelemetry observability, GitHub Actions CI, a live-backend Playwright acceptance suite, and a finalized one-command Docker Compose release. See [`docs/SECURITY.md`](docs/SECURITY.md), [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md), and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- [Getting started](#getting-started)
+- [Running it](#running-it) — Docker / native / CLI / tests
+- [Configuration](#configuration)
+- [How it works](#how-it-works)
+- [Repository layout](#repository-layout)
 
-This README covers step-by-step walkthroughs for each interface. For a narrower, more formal reference, see `docs/`:
+## Getting started
 
-- [`docs/HANDOVER.md`](docs/HANDOVER.md) — what ZeroShield is, setup, execution, extension, and safety controls, in one place (the SRS's required "handover guide").
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the seven-layer logical architecture, design patterns, component/deployment views, and run-flow sequence diagrams, each grounded in and cross-referenced to the actual code.
-- [`docs/DEMONSTRATION.md`](docs/DEMONSTRATION.md) — a ~10-minute guided walkthrough for demonstrating ZeroShield to a supervisor/reviewer, including a live reproducibility check.
-- [`docs/SECURITY.md`](docs/SECURITY.md) — authentication, RBAC, self-approval blocking, the audit trail, and the security test suite.
-- [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) — Prometheus metrics, structured JSON logging, and distributed tracing.
-- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — CI and the finalized one-command Docker Compose release.
-- [`docs/FUTURE_OPPORTUNITIES.md`](docs/FUTURE_OPPORTUNITIES.md) — documentation-only notes on cloud/Kubernetes/SaaS/SSO directions, deliberately not implemented.
-- [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) — every `zeroshield` CLI command and argument.
-- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — every environment variable and dependency extra.
-- [`docs/TESTING.md`](docs/TESTING.md) — the test suite in detail, including the security suite, E2E tests, and known gaps.
-- [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) — the Milestone 30 requirement-by-requirement SRS compliance review and D-05 (evidence retention policy) resolution.
+**Requirements:** Python 3.12+, Node.js 20+ (for the web app), and Docker Desktop (recommended — runs everything for you, including the message broker and object storage).
 
-## Running the ZeroShield Web Application
-
-The primary way to use ZeroShield (V2 Phase 4) - a full web app (`apps/web/`) covering
-Mission Control, Threat Intelligence, Experiment Studio, Approvals, live runs,
-verdicts/evidence, and system health, with no terminal, Swagger, or JSON editing
-required day-to-day. The easiest way to run it is the same `docker compose up` command
-in [Running ZeroShield with Docker](#running-zeroshield-with-docker) below - it starts
-this app alongside everything else on <http://localhost:3001>. See
-[`apps/web/README.md`](apps/web/README.md) for running it standalone (`npm run dev`)
-against an already-running API.
-
-**Signing in (V2 Phase 6):** every page requires an authenticated session -
-there is no seeded account, so the first thing to do after `docker compose up -d`
-is bootstrap an ADMIN:
+The fastest way to get a working instance:
 
 ```powershell
-docker compose exec api zeroshield create-admin --username <you> --password "<a strong password, 12+ characters>"
-```
-
-Then open <http://localhost:3001> and sign in. Create everyone else
-(`researcher`/`reviewer`/more `admin` accounts) from the **Users** page once
-signed in as that first ADMIN. See [`docs/SECURITY.md`](docs/SECURITY.md)
-for the full role model.
-
-## Running the ZeroShield Dashboard (legacy)
-
-ZeroShield's original visual dashboard, kept read-only for browsing existing
-experiments/results/evidence - use the web application above to submit a run. This
-section assumes you have never used a terminal before.
-
-### 1. Open a terminal in the project folder
-
-- Open **PowerShell** (search for it in the Start menu).
-- Move into the ZeroShield project folder by typing (adjust the path if your copy is somewhere else):
-
-  ```powershell
-  cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
-  ```
-
-### 2. One-time setup (only needed the first time, or after an update)
-
-Install the project and the dashboard's dependencies into its virtual environment:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[dashboard,dev]"
-```
-
-You only need to do this again if you pull new code changes.
-
-### 3. Launch the dashboard
-
-From the project folder, run:
-
-```powershell
-.\.venv\Scripts\python.exe -m streamlit run src/zeroshield/dashboard/app.py
-```
-
-A browser tab should open automatically at `http://localhost:8501`. If it doesn't, open that address in your browser manually.
-
-### 4. Using the dashboard
-
-- The **sidebar** lets you pick which experiment to look at (e.g. `ZC-VPN-EXP-001` or `ZC-TELECOM-EXP-001`).
-- The **Overview** tab explains what ZeroShield does.
-- The **Experiment & Safety** tab shows the experiment's details and whether ZeroShield's safety check currently allows it to run. If it's denied, the reason is shown and the "Run Experiment" button is disabled — this cannot be bypassed from the dashboard.
-- Click **Run Experiment** to execute it. This runs the same underlying engine used by the command line — nothing about the results is invented or adjusted for display.
-- The **Results**, **Test Cases**, and **Evidence** tabs then show what happened, including a case-by-case before-vs-after comparison.
-- The **Overleaf Export** tab produces a factual summary file for manual inclusion in the research write-up — it never edits the shared Overleaf document directly.
-
-### 5. Closing the dashboard
-
-Go back to the PowerShell window and press `Ctrl+C`.
-
-## Running the ZeroShield API
-
-ZeroShield also includes a REST API, so other programs (or you, using a browser-based test page) can list, validate, run, and inspect experiments over HTTP. This section assumes you have never used a terminal or an API before.
-
-### 1. Open a terminal in the project folder
-
-```powershell
-cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
-```
-
-### 2. One-time setup (only needed the first time, or after an update)
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[api,dev]"
-```
-
-### 3. Start RabbitMQ and the worker (required for runs to actually complete)
-
-As of Milestone 21, submitting a run no longer executes it directly — the API queues it on RabbitMQ and a separate **worker** process picks it up. Without a running broker and worker, a submitted run will just sit as `queued` forever. The simplest way to get RabbitMQ running is via Docker, even if you're running the API itself natively:
-
-```powershell
-docker compose up -d rabbitmq
-```
-
-Then, in a second PowerShell window, start the worker:
-
-```powershell
-cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
-.\.venv\Scripts\python.exe -m pip install -e ".[queue,dev]"
-.\.venv\Scripts\python.exe -m zeroshield.worker
-```
-
-Leave this window open too — the worker keeps running and processing jobs as long as this command is running.
-
-### 4. Start the API
-
-In a third PowerShell window:
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn zeroshield.api.app:app --reload
-```
-
-Leave this window open — the API keeps running as long as this command is running.
-
-### 5. Open Swagger (the interactive API test page)
-
-In your browser, go to:
-
-```
-http://localhost:8000/docs
-```
-
-This page lists every endpoint and lets you send real requests by clicking "Try it out" — you never need to write an HTTP request by hand.
-
-**Signing in (V2 Phase 6):** every route below except `GET /health`/`GET /metrics` now requires an authenticated session. This needs `DATABASE_URL` set for the API (see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)) and a bootstrapped ADMIN account:
-
-```powershell
-$env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
-.\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\zeroshield.exe create-admin --username alice --password "a strong password, 12+ chars"
-```
-
-Then in Swagger, open **POST /auth/login** → "Try it out" → enter that username/password → "Execute". Swagger runs in your browser at `localhost:8000`, so the session cookie it receives is automatically sent with every subsequent "Try it out" call on this page for the rest of this walkthrough — no separate step needed per request.
-
-### 6. List experiments
-
-In Swagger, open **GET /experiments** → "Try it out" → "Execute". You'll see `ZC-VPN-EXP-001` and `ZC-TELECOM-EXP-001` (or any other experiment file dropped into the `experiments/` folder — nothing is hard-coded).
-
-### 7. Validate an experiment
-
-Open **POST /experiments/{experiment_id}/validate** → "Try it out" → set `experiment_id` to `ZC-VPN-EXP-001` → in the request body put:
-
-```json
-{"execution_context": "local_unit_test"}
-```
-
-→ "Execute". You'll see whether ZeroShield's safety policy currently allows it to run, and why if not.
-
-### 8. Run a draft experiment using local_unit_test
-
-Both bundled experiments are still in `draft` review status, so the strict `experiment_run` context will always correctly refuse them (this is the safety gate working as intended, not a bug). To actually execute one for a local demonstration, use **POST /experiments/{experiment_id}/runs** with:
-
-```json
-{"execution_context": "local_unit_test"}
-```
-
-→ "Execute". This queues the run and returns immediately with a `job_id` and `status: "queued"` — it does not run the experiment itself. The worker (started in step 3) picks the job up, runs it for real, and writes real evidence to `results/`.
-
-Copy the `job_id`, then open **GET /jobs/{job_id}** → paste it in → "Execute". Keep re-running it (a few seconds apart) until `status` becomes `completed` (or `denied`/`failed`, with a reason) — that response also includes the key metrics and where the evidence was written.
-
-### 9. Inspect results/evidence
-
-Once a job has completed:
-
-- **GET /experiments/{experiment_id}/results** — the baseline-vs-mitigation comparison from the most recent run.
-- **GET /experiments/{experiment_id}/evidence** — factual evidence metadata (run IDs, dataset hash, integrity check) for the most recent run.
-
-Both return `404` until an experiment has actually been run at least once.
-
-### 10. Stop everything
-
-Go back to each PowerShell window (uvicorn, the worker) and press `Ctrl+C`, then stop RabbitMQ:
-
-```powershell
-docker compose down
-```
-
-## Running ZeroShield with Docker
-
-If you have Docker Desktop installed, you can run everything — API, dashboard, RabbitMQ, and the worker — without installing Python or any dependencies on your own machine at all. This is the easiest way to get asynchronous runs working, since it starts RabbitMQ and the worker for you automatically.
-
-### 1. Install Docker Desktop
-
-Download it from docker.com if you don't already have it, and make sure it's running (its whale icon appears in the system tray).
-
-### 2. Build and start ZeroShield
-
-```powershell
-cd C:\Users\raiha\OneDrive\Desktop\ZeroShield
+git clone <this-repo>
+cd ZeroShield
 docker compose up --build
 ```
 
-The first build downloads and installs everything and can take a few minutes; later runs are much faster. This starts every service (`postgres`, `rabbitmq`, `minio`, `api`, `worker`, `intelligence-worker`, `web`, `dashboard`, `prometheus`, `grafana`) — a run submitted through the web app or the API here is picked up and executed automatically, with no extra steps. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full service/port list and health-check details.
+This starts every service — the web app, API, worker, PostgreSQL, RabbitMQ, MinIO, and monitoring. First build takes a few minutes; later starts are fast.
 
-### 3. Bootstrap an ADMIN and open the tools
-
-There is no seeded account (V2 Phase 6) — bootstrap the first ADMIN before signing in anywhere:
+There is no seeded account, so bootstrap the first administrator:
 
 ```powershell
-docker compose exec api zeroshield create-admin --username <you> --password "<a strong password, 12+ characters>"
+docker compose exec api zeroshield create-admin --username <you> --password "<12+ characters>"
 ```
 
-- **Web app** (primary UI): `http://localhost:3001` — sign in with the account just created.
-- **API Swagger**: `http://localhost:8000/docs`
-- **Dashboard** (legacy, read-only, no login): `http://localhost:8502` (note: 8502, not Streamlit's usual 8501 — this avoids clashing with a locally-run, non-Docker dashboard on the same machine)
-- **Grafana**: `http://localhost:3000` (see [Optional: Prometheus & Grafana monitoring](#optional-prometheus--grafana-monitoring) below)
-- RabbitMQ management UI (optional, for the curious): `http://localhost:15673` (login `guest`/`guest`)
+Then open **http://localhost:3001** and sign in. Everything else (creating researcher/reviewer accounts, ingesting CVEs, building experiments) happens from the web UI from there.
 
-They behave exactly like the non-Docker versions described above — same safety checks, same experiments, same real evidence generation.
+## Running it
 
-### 4. Where results go
-
-Anything ZeroShield generates while running in Docker (evidence, comparisons, Overleaf exports, job records) is written to the same `results/`, `overleaf_exports/`, and `jobs/` folders you'd see running it directly — Docker doesn't hide or lose this data, it's shared with your project folder automatically.
-
-### 5. Stop everything
+### Option A — Docker Compose (everything, recommended)
 
 ```powershell
-docker compose down
+docker compose up --build
 ```
 
-### Using the command-line tool via Docker
+| Service | URL | Notes |
+|---|---|---|
+| Web app (primary UI) | http://localhost:3001 | Mission Control, Threat Intel, Experiment Studio, Approvals, Runs, Evidence |
+| API / Swagger | http://localhost:8000/docs | Interactive REST API explorer |
+| Dashboard (legacy) | http://localhost:8502 | Read-only Streamlit view, no login |
+| Grafana | http://localhost:3000 | login `zeroshield` / `zeroshield123` |
+| Prometheus | http://localhost:9090 | |
+| RabbitMQ management | http://localhost:15673 | login `guest` / `guest` |
+| MinIO console | http://localhost:9003 | login `zeroshield` / `zeroshield123` |
 
-One-off CLI commands can be run against the same image without starting the API/dashboard, for example:
+Anything ZeroShield generates (evidence, exports, job records) lands in `results/`, `overleaf_exports/`, and `jobs/` on your machine — Docker bind-mounts these, nothing stays trapped in a container. Stop everything with `docker compose down`.
+
+A single CLI command can also be run against the built image without starting the rest of the stack:
 
 ```powershell
 docker run --rm zeroshield:latest zeroshield --help
 ```
 
-## Optional: MinIO evidence storage
+### Option B — running natively
 
-By default, ZeroShield stores evidence (manifests, results, comparisons) as plain files under `results/`. As of Milestone 22, an S3-compatible alternative (`MinioEvidenceRepository`, in `zeroshield.repositories`) is also available, backed by [MinIO](https://min.io) — proving the evidence-storage design can be swapped without touching any research/orchestration code.
-
-Running via Docker Compose (`docker compose up`) now uses MinIO as the default evidence backend for the `worker`/`dashboard` services (V2 Platform Foundation phase — set via `ZEROSHIELD_EVIDENCE_BACKEND=minio` in `docker-compose.yml`). Running natively without Docker (or under `pytest`), the default remains local file storage — nothing changes unless you set `ZEROSHIELD_EVIDENCE_BACKEND=minio` yourself. The CLI always uses local file storage regardless.
-
-To select MinIO manually outside Docker:
+Install the backend into a virtual environment:
 
 ```powershell
-docker compose up -d minio
-.\.venv\Scripts\python.exe -m pip install -e ".[storage,dev]"
-$env:ZEROSHIELD_EVIDENCE_BACKEND = "minio"
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-Or construct one directly in Python: `zeroshield.repositories.minio_evidence_repository.default_minio_client()` (reads `MINIO_ENDPOINT`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`/`MINIO_SECURE`, defaulting to `localhost:9002` with the credentials set in `docker-compose.yml`) together with `MinioEvidenceRepository(client, bucket_name)` in place of `LocalEvidenceRepository`. The MinIO web console is at `http://localhost:9003` (login `zeroshield`/`zeroshield123`) if you want to browse stored evidence visually.
+Add extras as needed for the interface(s) you're running — see [Configuration](#configuration).
 
-## Optional: PostgreSQL run-lifecycle history
-
-As of the V2 Platform Foundation phase, ZeroShield can additionally record a rich, auditable run-lifecycle trail (`QUEUED → PREPARING → SAFETY_CHECK → RUNNING_BASELINE → RUNNING_MITIGATION → ANALYSING → GENERATING_EVIDENCE → COMPLETED`, or `DENIED`/`FAILED`) to PostgreSQL, alongside the existing file-based job status you already poll via `GET /jobs/{job_id}` (unchanged). This is **not** required to run ZeroShield: with no `DATABASE_URL` set, the API/worker use a no-op repository and behave exactly as before.
-
-Running via Docker Compose starts a `postgres` service and wires `DATABASE_URL` for `api`/`worker` automatically. To try it outside Docker:
+**Web app** (needs the API running separately, see below):
 
 ```powershell
-docker compose up -d postgres
-.\.venv\Scripts\python.exe -m pip install -e ".[db,dev]"
+cd apps/web
+npm install
+npm run dev
+```
+
+Open http://localhost:3000 (targets `http://localhost:8000` by default; override with `API_BASE_URL`).
+
+**API + async runs** — the API only *queues* a run; a separate worker process executes it, so both a broker and a worker need to be running:
+
+```powershell
+docker compose up -d rabbitmq postgres      # broker + auth/run-history database
+.\.venv\Scripts\python.exe -m pip install -e ".[api,queue,db,auth,dev]"
 $env:DATABASE_URL = "postgresql+psycopg://zeroshield:zeroshield123@localhost:5433/zeroshield"
 .\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\zeroshield.exe create-admin --username alice --password "a strong password, 12+ chars"
+
+# in a second terminal — the worker
+.\.venv\Scripts\python.exe -m zeroshield.worker
+
+# in a third terminal — the API
+.\.venv\Scripts\python.exe -m uvicorn zeroshield.api.app:app --reload
 ```
 
-## Optional: Prometheus & Grafana monitoring
+Swagger is then at http://localhost:8000/docs — every route except `/health`, `/metrics`, and `/auth/login` requires signing in first (`POST /auth/login` in Swagger; the session cookie is reused automatically for the rest of the page).
 
-As of Milestone 23, the API and worker expose **operational** metrics — request counts and latency, how many runs were submitted, how many jobs completed/were denied/failed, how long jobs took. These describe how the *system* is behaving, not what an experiment found: they are always separate from, and never a substitute for, the scientific evidence under `results/` or `GET /experiments/{id}/results`.
-
-- The API serves its own metrics at `GET /metrics` (visible in Swagger).
-- The worker serves its own metrics on a separate small HTTP server, since it isn't otherwise an HTTP service.
-
-To visualise them, start the monitoring stack alongside the rest of ZeroShield:
+**Dashboard** (legacy, read-only, no login):
 
 ```powershell
-docker compose up -d
+.\.venv\Scripts\python.exe -m pip install -e ".[dashboard,dev]"
+.\.venv\Scripts\python.exe -m streamlit run src/zeroshield/dashboard/app.py
 ```
 
-Then open:
+Opens at http://localhost:8501. Lets you pick a bundled experiment, inspect its safety-check status, run it, and browse results/evidence — it can't submit anything the web app's approval workflow doesn't already govern.
 
-- **Prometheus**: `http://localhost:9090` — try the query `zeroshield_worker_jobs_processed_total` after running an experiment.
-- **Grafana**: `http://localhost:3000` (login `zeroshield`/`zeroshield123`) — the "ZeroShield Operational Metrics" dashboard is pre-loaded automatically (no manual setup), showing API request rate, worker job outcomes, average job duration, and submitted-run counts.
-
-Submit a run via Swagger or the CLI, wait about 15–30 seconds for the next Prometheus scrape, then refresh the Grafana dashboard to see it reflected.
-
-## Security testing
-
-As of Milestone 26, `tests/security/` exercises the SRS's §10.3 threat model and §11.1 "Security" test level directly, alongside two fixes this milestone made to close real gaps against the SRS's own claims:
-
-- **Evidence immutability** (`test_evidence_immutability.py`) — `LocalEvidenceRepository`/`MinioEvidenceRepository` now reject a second `save_run_evidence()` call for the same `experiment_id`/`run_id` (raising `EvidenceAlreadyExistsError`) instead of silently overwriting existing evidence. `comparison.json` is deliberately exempt — it is a "latest comparison" pointer, not per-run evidence.
-- **Malformed queue message robustness** (`test_queue_message_robustness.py`) — the worker's `handle_message_body()` never raises, for a wide range of malformed/adversarial message bodies (empty, non-JSON, missing fields, invalid enum values, an embedded NUL byte, binary garbage, an oversized payload). Before this fix, a single malformed message would crash the consume loop and, since it was never acked, be redelivered and crash the worker again forever.
-- **Comprehensive path-traversal sweep** (`test_path_traversal_comprehensive.py`) — every id-accepting API route (`/experiments/{id}`, `/experiments/{id}/results`, `/experiments/{id}/evidence`, `/experiments/{id}/validate`, `/experiments/{id}/runs`, `/jobs/{id}`) against a shared list of malicious ids, plus a canary-file check proving nothing outside the sanctioned `results_root`/`jobs_dir`/`experiments_dir` is ever read back into a response.
-- **Dataset secret scanning** (`test_static_analysis_guards.py`, SAFE-006) — scans every real `experiments/*.json` and `test_data/**/*.json` file for secret-shaped strings (API keys, private key blocks, bearer tokens, generic credential assignments).
-- **Static dangerous-primitive tripwire** (`test_static_analysis_guards.py`, AC-09) — greps `src/` for `eval`/`exec`/`os.system`/`subprocess(..., shell=True)`/`pickle`/`__import__`. None exist today; this fails the build the day one is added without a deliberate, reviewed allowlist entry.
-- **Dependency vulnerability scan** (`test_dependency_vulnerabilities.py`) — runs the real `pip-audit` CLI against the installed environment. Requires outbound network access to the OSV/PyPI advisory database; skips (rather than fails) if that's unavailable, since no network is not evidence of no vulnerabilities.
-
-**Deliberately out of scope for this milestone** (testing, not infrastructure/design work):
-
-- **SAFE-005** (network egress denied by default for sandbox containers) — no sandbox container execution exists yet to test against.
-- **Cryptographic queue-payload signing** — the SRS's §10.3 "signed/validated payloads" threat-model line is currently satisfied by schema validation only (`RunJobMessage.model_validate_json`, `extra="forbid"`); message-level signing is a design addition, not something an automated test can retrofit.
-
-**V2 Phase 6** added authentication, RBAC, and audit-trail hardening on top of the above, unweakened — four more files (`test_auth_hardening.py`, `test_rbac_hardening.py`, `test_db_backed_id_hardening.py`, `test_minio_object_key_safety.py`). See [`docs/SECURITY.md`](docs/SECURITY.md) for what each one verifies.
-
-## Continuous Integration
-
-`.github/workflows/ci.yml` runs the full backend suite (ruff, mypy, pytest) and the full frontend suite (tsc, eslint, vitest, build, Playwright smoke tests) on every push and pull request — CI only, no deployment step. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
-
-## Running the tests
+### The command line
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+zeroshield validate-experiment experiments\ZC-VPN-EXP-001.json --context local_unit_test
+zeroshield run experiments\ZC-VPN-EXP-001.json --context local_unit_test
+zeroshield compare results\ZC-VPN-EXP-001
+zeroshield verify-evidence results\ZC-VPN-EXP-001\RUN-1234567890
+zeroshield create-admin --username alice --password "..."
 ```
 
-This runs the full suite (unit + integration) with **no external services required** — the async/queue tests use a fake in-process publisher, exactly as the API does when tested. `tests/integration/` additionally contains real, cross-process end-to-end tests:
+- `validate-experiment` — schema + dataset + safety-policy check, without executing anything.
+- `run` — executes baseline and mitigation, writes evidence to `results/`. Refuses to run if the safety policy denies it.
+- `compare` — prints an already-generated `comparison.json`; never re-runs anything.
+- `verify-evidence` — checks a run's artefacts against its manifest's integrity hash.
+- `create-admin` — bootstraps the first login (requires `DATABASE_URL`).
 
-- `test_cli_full_workflow.py` / `test_dashboard_full_workflow.py` — run automatically, no setup needed (real subprocess/real Streamlit rendering, but no external services).
-- `test_api_worker_real_broker.py` — publishes to and consumes from a **real** RabbitMQ broker instead of a fake, proving the actual message-queue mechanics work. This one is skipped by default and only runs if you explicitly opt in:
+Both bundled experiments (`ZC-VPN-EXP-001`, `ZC-TELECOM-EXP-001`) ship as `draft`, so `--context local_unit_test` is what lets you exercise them locally; the strict `experiment_run` context correctly refuses anything unapproved.
 
-  ```powershell
-  docker compose up -d rabbitmq
-  $env:ZEROSHIELD_E2E_RABBITMQ_URL = "amqp://guest:guest@localhost:5673/"
-  .\.venv\Scripts\python.exe -m pytest tests/integration/test_api_worker_real_broker.py
-  ```
+### Tests
 
-  It deliberately never falls back to a default host/port for this — an earlier version did, and on a machine with an unrelated RabbitMQ container already using the standard port, it silently connected to that instead of a ZeroShield broker.
+```powershell
+.\.venv\Scripts\python.exe -m pytest        # backend: unit + integration, no external services required
+cd apps/web && npm test                     # frontend unit/component tests
+cd apps/web && npm run test:e2e             # Playwright, smoke tier — no backend needed
+```
+
+A handful of integration tests opt into real infrastructure (a live RabbitMQ broker, a live Postgres database, a full live-stack Playwright run) and self-skip unless you explicitly set their `ZEROSHIELD_E2E_*` environment variable — see the test files under `tests/integration/` and `apps/web/e2e/`.
+
+## Configuration
+
+Nothing below is required for local development without Docker — the CLI, dashboard, and the synchronous parts of the API/tests all work with zero environment variables set.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | *(unset)* | PostgreSQL connection string — required for auth, threat-intel, and the run-lifecycle history. Without it, those routes are unavailable/no-op; core validation still runs. |
+| `RABBITMQ_URL` | `amqp://guest:guest@localhost:5672/` | Broker connection used by both the API and the worker. |
+| `ZEROSHIELD_EVIDENCE_BACKEND` | `local` | `local` (files under `results/`) or `minio` (S3-compatible object storage). |
+| `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | `localhost:9000` / `zeroshield` / `zeroshield123` | Only read when the MinIO backend is selected. |
+| `AI_PROVIDER` / `ANTHROPIC_API_KEY` / `AI_MODEL` | *(unset → disabled)* | Enables the optional AI Research Analyst. Every route works with it unset, just answering "unavailable". |
+| `NVD_API_KEY` / `GITHUB_TOKEN` | *(unset)* | Optional, raise rate limits on the CVE intelligence connectors. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | *(unset → no exporter)* | Distributed tracing collector endpoint. |
+
+Install extras from `pyproject.toml` as needed, e.g. `pip install -e ".[api,queue,db,auth,dev]"`. Available extras: `dashboard`, `api`, `queue`, `storage`, `db`, `intelligence`, `excel`, `ai`, `auth`, `observability`, `dev`.
+
+Copy `.env.example` to `.env` to override default local credentials (Postgres/MinIO/Grafana passwords) — every default works with no `.env` file at all.
+
+## How it works
+
+### The core idea
+
+Every "experiment" is a JSON document (`ExperimentDefinition`) describing a domain (VPN or Telecom), a synthetic dataset, and two processing strategies: a **baseline** that reproduces the vulnerable behaviour and a **mitigation** that reproduces the hardened fix. Running an experiment feeds the identical dataset through both strategies, records what each one did case by case, computes metrics (block rate, false-positive/negative rate, latency), and writes a hash-verified evidence bundle — never opinion, always a factual comparison.
+
+### Layered architecture
+
+```mermaid
+flowchart TB
+    L1["Threat intelligence<br/>NVD / CISA KEV / EPSS / GitHub Advisories → prioritised CVEs"]
+    L2["Experiment definition<br/>domain packs, templates, synthetic dataset generators"]
+    L3["Governance<br/>draft → review → approval, before anything can run"]
+    L4["Execution<br/>sandboxed baseline + mitigation strategies"]
+    L5["Evidence & metrics<br/>hash-verified manifests, comparison reports"]
+    L6["Continuous assurance<br/>control effectiveness, regression detection, revalidation"]
+
+    L1 --> L2 --> L3 --> L4 --> L5 --> L6
+```
+
+### Request flow
+
+Every interface (CLI, dashboard, API, worker) is a thin wrapper over the same core — none of them re-implement validation, safety checks, or metrics:
+
+```mermaid
+flowchart LR
+    CLI["CLI"] --> SVC
+    DASH["Dashboard"] --> SVC
+    API["API"] --> SVC
+    WORKER["Worker"] --> SVC
+    SVC["services.experiment_service"] --> ORCH["orchestration"]
+    ORCH --> RUNNER["ExperimentRunner"]
+    RUNNER --> POLICY["SafetyPolicy<br/>(evaluated before anything runs)"]
+    RUNNER --> STRAT["baseline / mitigation strategies"]
+    ORCH --> REPO["EvidenceRepository<br/>(local files or MinIO)"]
+```
+
+A synchronous CLI run does all of this in one process. Through the API, `POST /experiments/{id}/runs` only queues a `RunJobMessage` on RabbitMQ and returns immediately — a separate worker process consumes it, runs the same engine, and updates job status (`queued → running → completed/denied/failed`), polled via `GET /jobs/{job_id}`.
+
+### What each layer actually is
+
+| Layer | Responsibility | Key modules |
+|---|---|---|
+| Threat intelligence | Ingests and deduplicates CVEs from NVD/CISA KEV/EPSS/GitHub Advisories, scores a deterministic priority, classifies VPN/Telecom relevance | `zeroshield.intelligence` |
+| Domain packs & templates | Declare which strategies, datasets, and metrics are valid for a domain; versioned, never overwritten | `zeroshield.domain_packs`, `zeroshield.templates` |
+| Dataset generators | Produce deterministic, SHA-256-hashed synthetic test sets from a seed + config — no real exploit content | `zeroshield.generators` |
+| Experiment Studio | Builds an `ExperimentVersion` from a domain pack + template + dataset, and drives it through `DRAFT → READY_FOR_REVIEW → UNDER_REVIEW → APPROVED/REJECTED → RETIRED` | `zeroshield.studio` |
+| Safety policy | Evaluates a fixed set of rules (no real-system targeting, synthetic-only data, no weaponised payloads, must be approved before a real run) before every execution, no exceptions | `zeroshield.policies` |
+| Sandbox | Wraps every strategy call with a strategy allow-list, a timeout, a network-access guard, and a memory cap | `zeroshield.sandbox` |
+| Execution | Runs baseline and mitigation strategies against the dataset and records per-case outcomes | `zeroshield.runners`, `zeroshield.strategies`, `zeroshield.worker` |
+| Evidence & metrics | Hash-verified run manifests, before/after comparison reports | `zeroshield.repositories`, `zeroshield.metrics` |
+| Verdict | Deterministic, threshold-based EFFECTIVE / PARTIALLY_EFFECTIVE / INEFFECTIVE / REGRESSION outcome over a comparison report | `zeroshield.verdict` |
+| Continuous assurance | Binds runs to a Control/ControlVersion, aggregates effectiveness, detects regressions, and queues revalidation on new triggers (KEV/EPSS changes, advisory updates, staleness) | `zeroshield.assurance` |
+| AI research assistant (optional) | Advisory-only: failure-pattern classification, mitigation-gap analysis, CVE similarity narration, template/draft suggestions. Every output is persisted unreviewed and can never approve, execute, or alter anything itself | `zeroshield.ai` |
+| Auth & governance | Session-based login, four roles (viewer/researcher/reviewer/admin) enforced server-side on every route, self-approval blocking, an append-only audit trail | `zeroshield.auth`, `zeroshield.audit` |
+| Observability | Prometheus metrics, structured JSON logs, OpenTelemetry tracing across the API → queue → worker hop | `zeroshield.observability` |
+
+### Interfaces
+
+- **`apps/web/`** — the primary Next.js/React/TypeScript UI. Talks to the FastAPI backend exclusively, never to Postgres/MinIO/RabbitMQ/Python directly (see `apps/web/src/lib/api/client.ts`, its one point of contact with the backend).
+- **`src/zeroshield/api/`** — the FastAPI REST backend every other interface (including the web app) depends on.
+- **`src/zeroshield/dashboard/`** — the legacy Streamlit dashboard, read-only, kept for quick local browsing.
+- **`src/zeroshield/cli/`** — the `zeroshield` console script for scripted/local single-run use.
+- **`src/zeroshield/worker/`** — consumes queued jobs (experiment runs, intelligence syncs) from RabbitMQ and executes them.
+
+### Data flow on disk
+
+| Path | Contents |
+|---|---|
+| `experiments/` | `ExperimentDefinition` JSON files, auto-discovered by every interface |
+| `test_data/` | Synthetic `TestSet` JSON files referenced by experiments |
+| `results/` | Generated evidence: `<experiment_id>/<run_id>/manifest.json` + artefacts, `<experiment_id>/comparison.json` |
+| `jobs/` | Async job status records, the API/worker's polling side-channel |
+| `overleaf_exports/` | Generated write-up export files |
+
+### Safety and security, in short
+
+- **Safety policy is code, not convention.** `SafetyPolicy` runs before every execution and refuses anything targeting a real system, carrying non-synthetic data, using weaponised payloads, or lacking approval outside a local test context — enforced identically regardless of which interface triggered the run.
+- **Evidence is immutable.** A run's manifest, once written, can never be silently overwritten.
+- **Authentication & RBAC.** Argon2id-hashed passwords, opaque server-side sessions, account lockout, and four roles with no implicit hierarchy — every route names its exact allowed roles explicitly and enforces it server-side, never trusting the UI to hide a button.
+- **Self-approval is blocked.** Whoever created an experiment version cannot also approve it (an administrator override is explicit and logged).
+- **Everything security-relevant is audited.** An append-only audit trail records every session, approval, run, and configuration change with an actor, a target, and a timestamp.
+
+### Tech stack
+
+Python 3.12 (FastAPI, Pydantic, SQLAlchemy/Alembic, Streamlit) · Next.js/React/TypeScript/Tailwind · PostgreSQL · RabbitMQ · MinIO (S3-compatible) · Prometheus/Grafana · Docker Compose.
+
+## Repository layout
+
+```
+apps/web/            Next.js frontend
+src/zeroshield/       Python backend (API, CLI, worker, dashboard, domain logic)
+alembic/              Database migrations
+experiments/          Bundled ExperimentDefinition JSON files
+test_data/            Synthetic datasets referenced by experiments
+tests/                Backend test suite (unit, integration, security)
+docker-compose.yml    Full local stack definition
+Dockerfile            Backend image
+```

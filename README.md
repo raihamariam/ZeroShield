@@ -155,7 +155,7 @@ Nothing below is required for local development without Docker — the CLI, dash
 
 Install extras from `pyproject.toml` as needed, e.g. `pip install -e ".[api,queue,db,auth,dev]"`. Available extras: `dashboard`, `api`, `queue`, `storage`, `db`, `intelligence`, `excel`, `ai`, `auth`, `observability`, `dev`.
 
-Copy `.env.example` to `.env` to override default local credentials (Postgres/MinIO/Grafana passwords) — every default works with no `.env` file at all.
+Copy `.env.example` to `.env` to override default local credentials (Postgres/MinIO/Grafana passwords) and to set the AI Research Analyst variables (`AI_PROVIDER`/`GEMINI_API_KEY`/`AI_MODEL`) — every default works with no `.env` file at all.
 
 ## AI Research Analyst
 

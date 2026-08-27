@@ -25,7 +25,7 @@ from zeroshield.repositories import NullRunRepository, RunRepository
 from zeroshield.services.job_store import JobStore, RunJobMessage
 
 if TYPE_CHECKING:
-    # Type-only: keeps sqlalchemy/httpx/pika/anthropic out of this module's
+    # Type-only: keeps sqlalchemy/httpx/pika/google-genai out of this module's
     # *runtime* import graph for callers that never touch the
     # intelligence/studio/assurance/ai/auth/audit dependencies below - the
     # actual imports happen lazily inside each function body. zeroshield.auth.

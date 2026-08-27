@@ -545,9 +545,9 @@ def test_scenario_e_regression_detection_and_revalidation(admin_client: httpx.Cl
 
 
 def test_scenario_f_ai_unconfigured_core_still_works(admin_client: httpx.Client) -> None:
-    """docker-compose.yml sets no ANTHROPIC_API_KEY/AI_PROVIDER for the api
-    service, so this is the stack's real, default, unmodified state - not a
-    simulated one."""
+    """docker-compose.yml's api service defaults GEMINI_API_KEY/AI_PROVIDER to
+    empty/"none" when unset in the environment, so this is the stack's real,
+    default, unmodified state - not a simulated one."""
     # Seed a minimal, deterministic Vulnerability record so the AI route's own
     # 404-if-unknown-CVE check never masks the thing this scenario actually
     # proves (AI_PROVIDER unset -> 503 ai_unavailable). No other scenario

@@ -25,8 +25,8 @@
 # "auth" (argon2-cffi) is required, not optional, from V2 Phase 6 onward -
 # every route except /health, /metrics, and /auth/login requires a session,
 # so a container missing this would build and start fine but fail the first
-# real login attempt. "ai" (anthropic) stays optional at runtime (unset
-# ANTHROPIC_API_KEY and the app falls back to NullAIProvider - Step 1: "Core
+# real login attempt. "ai" (google-genai) stays optional at runtime (unset
+# GEMINI_API_KEY and the app falls back to NullAIProvider - Step 1: "Core
 # ZeroShield must still work when AI is disabled"), but is included here so
 # the opt-in path works without a separate image.
 #

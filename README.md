@@ -11,6 +11,7 @@ Detailed internal reference material (architecture deep-dive, requirements trace
 - [Getting started](#getting-started)
 - [Running it](#running-it) — Docker / native / CLI / tests
 - [Configuration](#configuration)
+- [AI Research Analyst](#ai-research-analyst)
 - [How it works](#how-it-works)
 - [Repository layout](#repository-layout)
 
@@ -148,13 +149,99 @@ Nothing below is required for local development without Docker — the CLI, dash
 | `RABBITMQ_URL` | `amqp://guest:guest@localhost:5672/` | Broker connection used by both the API and the worker. |
 | `ZEROSHIELD_EVIDENCE_BACKEND` | `local` | `local` (files under `results/`) or `minio` (S3-compatible object storage). |
 | `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | `localhost:9000` / `zeroshield` / `zeroshield123` | Only read when the MinIO backend is selected. |
-| `AI_PROVIDER` / `ANTHROPIC_API_KEY` / `AI_MODEL` | *(unset → disabled)* | Enables the optional AI Research Analyst. Every route works with it unset, just answering "unavailable". |
+| `AI_PROVIDER` / `GEMINI_API_KEY` / `AI_MODEL` | *(unset → disabled)* | Enables the optional AI Research Analyst (Google Gemini — see [AI Research Analyst](#ai-research-analyst)). Every route works with it unset, just answering "unavailable". |
 | `NVD_API_KEY` / `GITHUB_TOKEN` | *(unset)* | Optional, raise rate limits on the CVE intelligence connectors. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(unset → no exporter)* | Distributed tracing collector endpoint. |
 
 Install extras from `pyproject.toml` as needed, e.g. `pip install -e ".[api,queue,db,auth,dev]"`. Available extras: `dashboard`, `api`, `queue`, `storage`, `db`, `intelligence`, `excel`, `ai`, `auth`, `observability`, `dev`.
 
 Copy `.env.example` to `.env` to override default local credentials (Postgres/MinIO/Grafana passwords) — every default works with no `.env` file at all.
+
+## AI Research Analyst
+
+ZeroShield includes an optional, advisory-only AI assistant built on **Google Gemini**. It is disabled by default; core validation, intelligence, experiments, execution, evidence, and governance all work identically with or without it.
+
+### Architecture
+
+```mermaid
+flowchart TB
+    RAS["ResearchAnalystService"] --> PROV["AIProvider (abstract contract)"]
+    PROV --> GEM["GeminiProvider"]
+    PROV --> NULL["NullAIProvider"]
+    GEM --> API["Gemini API"]
+```
+
+- **`AIProvider`** is the one abstraction the rest of ZeroShield depends on — it exposes exactly one operation ("given a prompt and a JSON schema, return a JSON object matching that schema, or fail"). Nothing outside `zeroshield.ai` ever imports the Gemini SDK directly.
+- **`GeminiProvider`** is the only implementation that calls out to an external model. It is the sole external LLM ZeroShield supports.
+- **`NullAIProvider`** is what every route uses when AI is disabled or misconfigured — it never crashes, it answers "AI is currently unavailable" (HTTP 503), and every non-AI feature keeps working.
+
+### Setup
+
+Install the `ai` extra along with whatever else you need:
+
+```powershell
+pip install -e ".[api,db,intelligence,ai,auth,observability]"
+```
+
+Then configure:
+
+```env
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_api_key_here
+AI_MODEL=gemini-2.5-flash
+```
+
+`AI_MODEL` is optional — it defaults to a current Flash-class Gemini model chosen for structured-output support, latency/cost, and free-tier practicality; override it any time without touching code. Get a key from Google AI Studio.
+
+Start ZeroShield as usual — `docker compose up --build` (pass the variables above via `.env`, which `docker-compose.yml` forwards into the `api` service), or natively with the environment variables set before starting `uvicorn`. No other service needs Gemini configuration; the worker and intelligence-worker never call it.
+
+### What the AI Analyst does
+
+Exposed under `/vulnerabilities/{cve_id}/analyst/*` in the API, the analyst can:
+
+- classify the likely defensive failure pattern for a CVE
+- identify mitigation gaps using CVE/vendor-advisory context
+- explain deterministic similar-CVE results (it narrates a candidate list the correlation engine already produced — it never searches for similar CVEs itself)
+- recommend an existing, allow-listed validation template (never invents a template, domain pack, or strategy)
+- draft an experiment proposal for a human to refine in Experiment Studio
+- explain a deterministic regression finding (it never decides whether a regression occurred)
+
+Gemini is an **analyst**, not the decision engine — everything above is a suggestion; nothing it produces can execute, approve, or alter anything by itself.
+
+### Flow
+
+```mermaid
+flowchart TB
+    A["NVD / CISA KEV / EPSS / Vendor Advisories"] --> B["Vulnerability Intelligence"]
+    B --> C["Domain Pack"]
+    C --> D["AI Research Analyst (Gemini)"]
+    D --> E["Structured AI Assessment"]
+    E --> F["Pydantic + Allow-list Validation"]
+    F --> G["Human Review"]
+    G --> H["Experiment Studio"]
+    H --> I["SafetyPolicy"]
+    I --> J["Controlled Validation"]
+    J --> K["Evidence"]
+    K --> L["Deterministic Comparison"]
+```
+
+### Grounding, not training
+
+ZeroShield does not fine-tune Gemini. Each request is grounded with real, already-computed ZeroShield context — CVE description, CVSS, EPSS, CISA KEV status, vendor advisories, domain information, the domain pack's registered failure patterns and templates, and deterministic correlation results — so the model produces ZeroShield-specific recommendations without any change to the underlying weights. Fine-tuning, embeddings, vector databases, and RAG are out of scope for this integration.
+
+### Human review
+
+Every AI assessment is persisted as `reviewed=False` and stays that way until a person explicitly reviews it via `POST /ai-assessments/{id}/review`. The governance principle is fixed:
+
+> Gemini recommends. ZeroShield validates. Humans approve. Deterministic systems execute and decide.
+
+### If Gemini is unavailable
+
+If Gemini has no API key configured, is rate-limited, is unreachable, times out, or returns invalid output, only the AI Analyst endpoints are affected — they answer 503/502 instead of crashing. Everything else (intelligence ingestion, prioritisation, experiments, controlled execution, evidence, governance, deterministic validation) keeps working exactly as if AI were disabled.
+
+### A note on data and free tiers
+
+Google may offer developer/free-tier usage for Gemini, but pricing and quotas change — check Google's current terms before relying on a specific tier. For ZeroShield development/demo use, only send public vulnerability information, public vendor advisories, and synthetic test data through the AI Analyst; a free-tier configuration is not an appropriate place to send confidential customer or organisational security information.
 
 ## How it works
 
@@ -255,3 +342,4 @@ tests/                Backend test suite (unit, integration, security)
 docker-compose.yml    Full local stack definition
 Dockerfile            Backend image
 ```
+

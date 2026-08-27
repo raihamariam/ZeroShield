@@ -28,7 +28,7 @@ class AIAssessmentBase(BaseModel):
     source_ids: list[str] = Field(
         default_factory=list, description="IDs of sources this assessment is grounded in (CVE IDs, experiment IDs, URLs)."
     )
-    provider: str = Field(description="AI provider that generated this assessment, e.g. 'anthropic'.")
+    provider: str = Field(description="AI provider that generated this assessment, e.g. 'gemini'.")
     model: str = Field(description="Model ID that generated this assessment.")
     generated_at: datetime
 

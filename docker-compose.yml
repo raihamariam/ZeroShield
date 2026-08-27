@@ -186,6 +186,9 @@ services:
       MINIO_ACCESS_KEY: zeroshield
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-zeroshield123}
       MINIO_SECURE: "false"
+      AI_PROVIDER: ${AI_PROVIDER:-none}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
     volumes:
       - ./results:/app/results
       - ./overleaf_exports:/app/overleaf_exports

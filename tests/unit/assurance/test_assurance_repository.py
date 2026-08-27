@@ -185,7 +185,7 @@ def test_save_and_review_ai_assessment(assurance_repo: AssuranceRepository) -> N
     record = assurance_repo.save_assessment(
         assessment_type="mitigation_gap", subject_type="vulnerability", subject_id="CVE-2024-00001",
         payload={"gaps": ["no credential rotation guidance"], "rationale": "x", "confidence": 0.7,
-                 "source_ids": [], "provider": "anthropic", "model": "claude-opus-5"},
+                 "source_ids": [], "provider": "gemini", "model": "gemini-2.5-flash"},
         confidence=0.7,
     )
     assert record.reviewed is False
